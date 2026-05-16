@@ -487,3 +487,201 @@ Restore the old deployed runtime behavior where brief hand loss preserves contex
 - persistent session state
 - WebSocket delivery
 - speech or TTS integration
+
+## Phase 4F frontend follow-up: capture latency tuning
+
+### Purpose
+
+Reduce perceived warm-up latency in the live webcam experience by making the continuous capture loop faster and user-configurable without changing backend inference logic.
+
+### Files created or modified
+
+- modified:
+  - `frontend/src/App.jsx`
+  - `frontend/src/components/WebcamPanel.jsx`
+  - `frontend/src/components/PredictionCard.jsx`
+  - `frontend/README.md`
+  - `docs/CHANGELOG.md`
+
+### Major design decisions
+
+- add frontend capture presets instead of hard-coding one interval
+- default to `Fast` at `100ms` per frame
+- keep the in-flight guard so overlapping requests never stack
+- count skipped ticks explicitly so operators can see when the frontend is outrunning backend response time
+
+### Verification and tests performed
+
+- code-path review of timer restart behavior and skip-on-in-flight handling
+- runtime stats surface updated to show selected interval and skipped ticks
+
+### Known limitations
+
+- effective frame rate still depends on backend response speed
+- this is still timer-based browser capture rather than streaming
+
+### Intentionally deferred
+
+- WebSocket transport
+- backend-side queueing or adaptive sampling
+
+## Release refinement: product-facing UI and transition hold
+
+### Purpose
+
+Polish the live ASL recognition experience so it behaves more like a released realtime product and less like a developer validation dashboard.
+
+### Files created or modified
+
+- modified:
+  - `backend/app/ml/runtime_config.py`
+  - `backend/app/ml/runtime_state.py`
+  - `backend/app/ml/frame_processor.py`
+  - `backend/app/ml/inference_engine.py`
+  - `backend/app/schemas/inference.py`
+  - `backend/app/services/inference_service.py`
+  - `frontend/src/api/client.js`
+  - `frontend/src/App.jsx`
+  - `frontend/src/components/WebcamPanel.jsx`
+  - `frontend/src/components/PredictionCard.jsx`
+  - `frontend/src/index.css`
+  - `backend/README.md`
+  - `frontend/README.md`
+  - `docs/CHANGELOG.md`
+
+### Major design decisions
+
+- remove visible mock inference and capture-speed controls from the main UI
+- hardcode the live loop to the fastest validated interval of `100ms`
+- shorten the top status cards to product-facing labels:
+  - backend
+  - mode
+  - session
+- add a lightweight keypoint overlay payload to backend frame responses so the webcam can show detection guidance by default
+- keep raw Top-K output available, but demote it into advanced details
+- stop using raw model guesses as the primary displayed output during weak transition periods
+- add a short post-stable-output hold so the previous accepted sign remains visible while the next sign is still being formed
+
+### Verification and tests performed
+
+- backend compile verification
+- existing idle-state logic preserved conceptually:
+  - short hand loss still holds context
+  - prolonged hand loss still clears state and returns to waiting-for-hands
+- frontend code-path review for:
+  - hidden mock UI
+  - default keypoint overlay
+  - fixed 100ms capture loop
+  - advanced-details-only debug controls
+
+### Known limitations
+
+- keypoint overlay depends on backend frame processing and is not fully frontend-local
+- preview overlay refresh while the camera is idle uses a lightweight debug request path
+- raw candidates still exist internally and in advanced details, but the main output is now intentionally more conservative
+
+### Intentionally deferred
+
+- WebSockets
+- sentence-level translation
+- TTS
+- deployment packaging
+
+## Frontend overlay refinement: low-latency keypoints
+
+### Purpose
+
+Replace delayed backend-driven keypoint overlays with a browser-side overlay path so the visible hand landmarks track the live webcam feed more closely.
+
+### Files created or modified
+
+- created:
+  - `frontend/src/lib/handLandmarker.js`
+- modified:
+  - `frontend/package.json`
+  - `frontend/src/components/WebcamPanel.jsx`
+  - `frontend/README.md`
+  - `docs/COMPONENT_ANATOMY.md`
+  - `docs/CHANGELOG.md`
+
+### Major design decisions
+
+- keep backend inference logic unchanged
+- stop using backend `keypoint_overlay` data as the primary live webcam overlay source
+- use browser-side MediaPipe Tasks hand landmarks for visual feedback only
+- keep the overlay hand-only in the browser to reduce latency and CPU load
+- keep backend MediaPipe preprocessing as the recognition source of truth
+- stop polling `/api/inference/frame-debug` during normal live camera use
+
+### Verification and tests performed
+
+- code-path review of the new browser-side overlay loop
+- ensured the visible overlay no longer depends on `/api/inference/frame` or `/api/inference/frame-debug` round trips
+
+### Known limitations
+
+- browser-side overlay depends on the frontend MediaPipe Tasks package and its model assets
+- frontend overlay is hand-only, while backend inference still uses hands plus selected pose and face features
+
+### Intentionally deferred
+
+- browser-side pose and face overlays
+- WebSocket streaming
+- full offline packaging of frontend overlay model assets
+
+## Runtime tuning parity audit and fix
+
+### Purpose
+
+Verify that the new FastAPI backend preserves the old live-runtime tuning that helped improve operational success from about `82.7%` to `91.67%`, and fix any remaining parity gaps without changing the model itself.
+
+### Files created or modified
+
+- created:
+  - `backend/scripts/test_runtime_tuning_parity.py`
+- modified:
+  - `backend/app/ml/stabilization.py`
+  - `backend/README.md`
+  - `docs/COMPONENT_ANATOMY.md`
+  - `docs/CHANGELOG.md`
+
+### Major design decisions
+
+- treat the old live-runtime improvement as a backend decision-logic concern rather than a retraining task
+- preserve the existing production contract:
+  - same checkpoint
+  - same `180D` preprocessing
+  - same `30`-frame sequence length
+- audit old and new runtime behavior feature by feature before changing code
+- fix only the confirmed parity gap:
+  - the stable-output cooldown path now compares against the previously accepted stable sign before overwriting it
+
+### Verification and tests performed
+
+- `python backend\scripts\test_stabilization.py`
+- `python backend\scripts\test_idle_state.py`
+- `python backend\scripts\test_runtime_tuning_parity.py`
+- `python -m compileall backend\app backend\scripts`
+
+The parity script verifies:
+
+- stable signs are not immediately replaced by weak random predictions
+- no-hands transitions still go `holding_context -> waiting_for_hands`
+- low-confidence raw predictions do not become stable outputs
+- confusion-pair near-ties are held
+- peak-sign preservation still works
+- the `10`-prediction window and `6`-vote requirement still work
+- adaptive fallback only accepts lower-confidence predictions when the runner-up margin is strong enough
+
+### Known limitations
+
+- the platform ports the portable runtime logic, not the old desktop OpenCV UI behavior
+- the old live improvement also depended partly on user execution refinement, not only backend logic
+- the system still remains an isolated-sign recognizer rather than a continuous sentence translator
+
+### Intentionally deferred
+
+- retraining the model
+- changing the checkpoint
+- changing the `180D` feature construction
+- changing the `30`-frame sequence length

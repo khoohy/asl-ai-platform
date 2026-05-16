@@ -11,7 +11,11 @@ import numpy as np
 
 from app.ml.keypoint_extraction import KeypointExtractor
 from app.ml.preprocessing import WLASLFeatureEngineering
-from app.ml.runtime_config import INPUT_DIM
+from app.ml.runtime_config import (
+    INPUT_DIM,
+    SELECTED_FACE_LANDMARKS,
+    SELECTED_POSE_LANDMARKS,
+)
 
 
 @dataclass
@@ -23,6 +27,7 @@ class FrameProcessingResult:
     note: str
     hands_detected: bool
     any_landmarks_detected: bool
+    keypoint_overlay: dict[str, list[list[float]]]
 
 
 class FrameProcessor:
@@ -57,6 +62,7 @@ class FrameProcessor:
             )
 
         keypoints = extractor.extract_keypoints(frame_bgr)
+        keypoint_overlay = self._build_keypoint_overlay(keypoints)
         hands_detected = self._has_hand_landmarks(keypoints)
         any_landmarks_detected = self._has_any_landmarks(keypoints)
         if not hands_detected:
@@ -67,6 +73,7 @@ class FrameProcessor:
                     "Pose or face landmarks were detected, but no hands are visible.",
                     hands_detected=False,
                     any_landmarks_detected=True,
+                    keypoint_overlay=keypoint_overlay,
                 )
             return self._result(
                 "no_landmarks",
@@ -74,6 +81,7 @@ class FrameProcessor:
                 "MediaPipe did not detect usable hand, pose, or face landmarks.",
                 hands_detected=False,
                 any_landmarks_detected=False,
+                keypoint_overlay=keypoint_overlay,
             )
 
         feature_vector = self._build_feature_vector(keypoints)
@@ -84,6 +92,7 @@ class FrameProcessor:
                 f"Expected feature vector shape ({INPUT_DIM},), got {feature_vector.shape}.",
                 hands_detected=True,
                 any_landmarks_detected=any_landmarks_detected,
+                keypoint_overlay=keypoint_overlay,
             )
 
         return self._result(
@@ -92,6 +101,7 @@ class FrameProcessor:
             "Frame decoded and converted into a valid 180D feature vector.",
             hands_detected=True,
             any_landmarks_detected=any_landmarks_detected,
+            keypoint_overlay=keypoint_overlay,
         )
 
     def _build_feature_vector(self, keypoints_dict: dict[str, np.ndarray]) -> np.ndarray:
@@ -131,6 +141,43 @@ class FrameProcessor:
         return self.extractor
 
     @staticmethod
+    def _build_keypoint_overlay(
+        keypoints_dict: dict[str, np.ndarray],
+    ) -> dict[str, list[list[float]]]:
+        left_hand = np.asarray(
+            keypoints_dict.get("left_hand", np.zeros((21, 3), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        right_hand = np.asarray(
+            keypoints_dict.get("right_hand", np.zeros((21, 3), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        pose = np.asarray(
+            keypoints_dict.get("pose", np.zeros((33, 3), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        face = np.asarray(
+            keypoints_dict.get("face", np.zeros((478, 3), dtype=np.float32)),
+            dtype=np.float32,
+        )
+
+        return {
+            "left_hand": FrameProcessor._points_to_overlay(left_hand),
+            "right_hand": FrameProcessor._points_to_overlay(right_hand),
+            "pose": FrameProcessor._points_to_overlay(pose[SELECTED_POSE_LANDMARKS]),
+            "face": FrameProcessor._points_to_overlay(face[SELECTED_FACE_LANDMARKS]),
+        }
+
+    @staticmethod
+    def _points_to_overlay(points: np.ndarray) -> list[list[float]]:
+        if points.size == 0 or not np.any(points):
+            return []
+        return [
+            [float(point[0]), float(point[1])]
+            for point in np.asarray(points, dtype=np.float32)
+        ]
+
+    @staticmethod
     def _strip_data_url_prefix(image_base64: str) -> str:
         if "," in image_base64 and image_base64.lower().startswith("data:"):
             return image_base64.split(",", maxsplit=1)[1]
@@ -157,6 +204,7 @@ class FrameProcessor:
         note: str,
         hands_detected: bool = False,
         any_landmarks_detected: bool = False,
+        keypoint_overlay: dict[str, list[list[float]]] | None = None,
     ) -> FrameProcessingResult:
         feature_dim = int(feature_vector.shape[0]) if feature_vector is not None else 0
         return FrameProcessingResult(
@@ -167,4 +215,10 @@ class FrameProcessor:
             note=note,
             hands_detected=hands_detected,
             any_landmarks_detected=any_landmarks_detected,
+            keypoint_overlay=keypoint_overlay or {
+                "left_hand": [],
+                "right_hand": [],
+                "pose": [],
+                "face": [],
+            },
         )

@@ -40,6 +40,9 @@ class RuntimeSessionState:
     missing_hands_count: int = 0
     hand_grace_remaining: int = HAND_LOSS_GRACE_FRAMES
     is_idle: bool = True
+    stable_output_hold_remaining: int = 0
+    stable_output_cooldown_remaining: int = 0
+    transition_cooldown_remaining: int = 0
 
     def __post_init__(self) -> None:
         self.feature_buffer = deque(maxlen=self.sequence_length)
@@ -74,6 +77,9 @@ class RuntimeSessionState:
         self.last_raw_confidence = 0.0
         self.stabilization_status = "raw_only"
         self.last_motion_score = 0.0
+        self.stable_output_hold_remaining = 0
+        self.stable_output_cooldown_remaining = 0
+        self.transition_cooldown_remaining = 0
 
     def reset(self) -> None:
         self.clear_runtime_context()
@@ -82,3 +88,11 @@ class RuntimeSessionState:
         self.missing_hands_count = 0
         self.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
         self.is_idle = True
+
+    def advance_output_timers(self) -> None:
+        if self.stable_output_hold_remaining > 0:
+            self.stable_output_hold_remaining -= 1
+        if self.stable_output_cooldown_remaining > 0:
+            self.stable_output_cooldown_remaining -= 1
+        if self.transition_cooldown_remaining > 0:
+            self.transition_cooldown_remaining -= 1

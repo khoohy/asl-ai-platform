@@ -58,6 +58,8 @@ def run_frame_debug(payload: InferenceRequest) -> FrameDebugResponse:
         feature_dim=result.feature_dim,
         expected_dim=result.expected_dim,
         note=result.note,
+        hands_detected=result.hands_detected,
+        keypoint_overlay=result.keypoint_overlay,
     )
 
 

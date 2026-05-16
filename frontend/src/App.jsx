@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
 
 import {
-  API_BASE_URL,
   fetchHealth,
   resetRealInferenceSession,
-  runMockInference,
   runRealInference,
 } from "./api/client";
-import HealthStatus from "./components/HealthStatus";
-import MockInferencePanel from "./components/MockInferencePanel";
 import PredictionCard from "./components/PredictionCard";
 import WebcamPanel from "./components/WebcamPanel";
 
@@ -21,16 +17,15 @@ export default function App() {
     framesSent: 0,
     successfulResponses: 0,
     failedResponses: 0,
-    captureIntervalMs: 200,
+    skippedTicks: 0,
+    captureIntervalMs: 100,
     isRequestInFlight: false,
     isCameraActive: false,
     isInferenceSessionRunning: false,
   });
   const [healthError, setHealthError] = useState("");
-  const [manualInferenceError, setManualInferenceError] = useState("");
   const [realInferenceError, setRealInferenceError] = useState("");
   const [isHealthLoading, setIsHealthLoading] = useState(true);
-  const [isManualInferenceLoading, setIsManualInferenceLoading] = useState(false);
   const [isRealInferenceLoading, setIsRealInferenceLoading] = useState(false);
   const [isSessionResetting, setIsSessionResetting] = useState(false);
 
@@ -50,38 +45,6 @@ export default function App() {
       );
     } finally {
       setIsHealthLoading(false);
-    }
-  }
-
-  async function handleRunInference() {
-    setIsManualInferenceLoading(true);
-    setManualInferenceError("");
-
-    try {
-      const response = await runMockInference();
-      setPrediction({
-        ...response,
-        status: "mock",
-        frames_collected: 0,
-        sequence_length: 30,
-        top_k: [],
-        raw_prediction: response.prediction,
-        raw_confidence: response.confidence,
-        stable_prediction: null,
-        stable_confidence: 0,
-        stabilization_status: "mock",
-        vote_count: 0,
-        vote_window_size: 10,
-      });
-    } catch (error) {
-      setPrediction(null);
-      setManualInferenceError(
-        error instanceof Error
-          ? error.message
-          : "Unable to run mock inference.",
-      );
-    } finally {
-      setIsManualInferenceLoading(false);
     }
   }
 
@@ -148,6 +111,14 @@ export default function App() {
     loadHealth();
   }, []);
 
+  const backendStatusLabel = healthError
+    ? "Offline"
+    : health?.status === "ok"
+      ? "Connected"
+      : isHealthLoading
+        ? "Checking"
+        : "Unavailable";
+
   return (
     <div className="app-shell">
       <div className="background-orb background-orb--left" />
@@ -156,27 +127,25 @@ export default function App() {
       <main className="dashboard">
         <section className="hero">
           <div className="hero-intro">
-            <p className="eyebrow">Phase 4E stabilized real inference</p>
+            <p className="eyebrow">Real-time sign recognition</p>
             <h1>ASL AI Platform</h1>
             <p className="hero-copy">
-              A browser-first dashboard for validating backend availability,
-              capturing webcam frames continuously, filling a 30-frame rolling
-              buffer automatically, and testing raw plus stabilized ASL model
-              inference during live webcam use.
+              Live ASL recognition with webcam capture, keypoint guidance, and
+              stabilized sign output from a 30-frame production sequence model.
             </p>
           </div>
 
           <div className="hero-meta">
             <div>
-              <span className="hero-label">Backend URL</span>
-              <code>{API_BASE_URL}</code>
+              <span className="hero-label">Backend</span>
+              <strong>{backendStatusLabel}</strong>
             </div>
             <div>
-              <span className="hero-label">Current mode</span>
-              <strong>Continuous stabilized 30-frame inference</strong>
+              <span className="hero-label">Mode</span>
+              <strong>Live Recognition</strong>
             </div>
             <div>
-              <span className="hero-label">Session ID</span>
+              <span className="hero-label">Session</span>
               <strong>{REAL_INFERENCE_SESSION_ID}</strong>
             </div>
           </div>
@@ -201,21 +170,6 @@ export default function App() {
               runtimeStats={runtimeStats}
             />
           </aside>
-        </section>
-
-        <section className="support-grid">
-          <HealthStatus
-            health={health}
-            isLoading={isHealthLoading}
-            error={healthError}
-            onRefresh={loadHealth}
-          />
-
-          <MockInferencePanel
-            isLoading={isManualInferenceLoading}
-            error={manualInferenceError}
-            onRunInference={handleRunInference}
-          />
         </section>
       </main>
     </div>

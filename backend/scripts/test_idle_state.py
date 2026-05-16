@@ -72,6 +72,12 @@ def make_ok_frame() -> FrameProcessingResult:
         note="Synthetic valid hand frame.",
         hands_detected=True,
         any_landmarks_detected=True,
+        keypoint_overlay={
+            "left_hand": [[0.5, 0.5] for _ in range(21)],
+            "right_hand": [[0.5, 0.5] for _ in range(21)],
+            "pose": [],
+            "face": [],
+        },
     )
 
 
@@ -84,6 +90,12 @@ def make_no_hands_frame() -> FrameProcessingResult:
         note="Synthetic no-hands frame.",
         hands_detected=False,
         any_landmarks_detected=True,
+        keypoint_overlay={
+            "left_hand": [],
+            "right_hand": [],
+            "pose": [[0.5, 0.3] for _ in range(7)],
+            "face": [[0.5, 0.4] for _ in range(11)],
+        },
     )
 
 
@@ -113,7 +125,14 @@ def main() -> None:
     if last_valid_response is None:
         raise RuntimeError("No valid responses were produced during warmup.")
 
-    if last_valid_response["status"] not in {"collecting_votes", "stabilized", "raw_predicted", "low_confidence"}:
+    if last_valid_response["status"] not in {
+        "collecting_votes",
+        "collecting_evidence",
+        "transitioning",
+        "stabilized",
+        "raw_predicted",
+        "low_confidence",
+    }:
         raise RuntimeError("Expected a real inference status after valid frames filled the buffer.")
 
     holding_response = None

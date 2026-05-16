@@ -99,7 +99,7 @@ code {
   z-index: 1;
   width: min(1320px, calc(100% - 2rem));
   margin: 0 auto;
-  padding: 2.25rem 0 3rem;
+  padding: 1.2rem 0 2rem;
 }
 
 .hero {
@@ -107,7 +107,7 @@ code {
   grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
   gap: 1.2rem;
   align-items: end;
-  padding: 1.6rem 1.7rem;
+  padding: 1.15rem 1.3rem;
   border: 1px solid var(--border);
   border-radius: 28px;
   background:
@@ -143,20 +143,21 @@ code {
 
 .hero-copy {
   max-width: 48rem;
-  margin: 0.9rem 0 0;
-  font-size: 1rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.96rem;
   color: var(--text-muted);
 }
 
 .hero-meta {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
   margin-top: 0;
 }
 
 .hero-meta div {
-  padding: 0.95rem 1rem;
+  min-width: 0;
+  padding: 0.78rem 0.9rem;
   border-radius: var(--radius-soft);
   background: rgba(148, 163, 184, 0.06);
   border: 1px solid rgba(148, 163, 184, 0.1);
@@ -174,6 +175,9 @@ code {
 
 .hero strong,
 .hero code {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text-main);
 }
 
@@ -181,7 +185,7 @@ code {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
   gap: 1rem;
-  margin-top: 1rem;
+  margin-top: 0.85rem;
 }
 
 .live-dashboard__main,
@@ -197,11 +201,11 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
-  margin-top: 1rem;
+  margin-top: 0.85rem;
 }
 
 .panel {
-  padding: 1.35rem;
+  padding: 1.1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   background:
@@ -227,8 +231,9 @@ code {
 }
 
 .panel-copy {
-  margin: 0.8rem 0 1rem;
+  margin: 0.5rem 0 0.7rem;
   color: var(--text-muted);
+  font-size: 0.95rem;
 }
 
 .status-pill {
@@ -318,7 +323,8 @@ code {
 }
 
 .meta-grid--camera {
-  margin-top: 1rem;
+  margin-top: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .meta-grid--compact {
@@ -328,6 +334,10 @@ code {
 .meta-grid--compact div,
 .meta-grid--secondary div {
   padding: 0.78rem 0.88rem;
+}
+
+.meta-grid__span-full {
+  grid-column: 1 / -1;
 }
 
 .request-preview {
@@ -612,17 +622,11 @@ code {
   color: #ffb4bc;
 }
 
-.webcam-status-stack {
-  display: grid;
-  gap: 0.55rem;
-  margin-top: 1rem;
-}
-
 .status-message-box {
   display: grid;
   gap: 0.45rem;
-  min-height: 4.9rem;
-  padding: 0.85rem 0.95rem;
+  min-height: 6rem;
+  padding: 0.72rem 0.82rem;
   border-radius: var(--radius-soft);
   background: rgba(148, 163, 184, 0.07);
   border: 1px solid rgba(148, 163, 184, 0.1);
@@ -637,7 +641,7 @@ code {
 }
 
 .helper-message {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
   padding: 0.1rem 0;
 }
 
@@ -645,23 +649,102 @@ code {
   color: var(--text-dim);
 }
 
-.control-panel {
-  display: grid;
-  gap: 0.8rem;
-  margin-top: 1rem;
+.control-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: stretch;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(9, 17, 29, 0.72);
 }
 
-.control-grid {
-  display: grid;
-  gap: 0.75rem;
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
 }
 
-.control-grid--camera {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.toolbar-group--speed {
+  flex: 1 1 320px;
 }
 
-.control-grid--inference {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.toolbar-group--camera,
+.toolbar-group--inference {
+  flex: 1 1 360px;
+}
+
+.toolbar-group__label {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.toolbar-actions {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.capture-speed-options {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.capture-speed-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  min-height: 2.7rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  flex: 1 1 0;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.48);
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.capture-speed-option span {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.capture-speed-option strong {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.capture-speed-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(76, 201, 255, 0.2);
+}
+
+.capture-speed-option--active {
+  border-color: rgba(76, 201, 255, 0.3);
+  background: rgba(76, 201, 255, 0.1);
+}
+
+.capture-speed-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
 }
 
 .control-button {
@@ -676,6 +759,21 @@ code {
 
 .control-button--wide {
   min-height: 3.75rem;
+}
+
+.control-button--compact {
+  min-height: 2.7rem;
+  padding: 0.62rem 0.8rem;
+}
+
+.control-button--manual {
+  min-height: 2.95rem;
+}
+
+.control-button--active {
+  border-color: rgba(76, 201, 255, 0.28);
+  background: rgba(76, 201, 255, 0.12);
+  color: #d6f8ff;
 }
 
 .control-button__label {
@@ -723,8 +821,8 @@ code {
 
 .webcam-stage {
   position: relative;
-  min-height: 420px;
-  margin: 1rem 0 1rem;
+  min-height: 340px;
+  margin: 0;
   border-radius: 22px;
   overflow: hidden;
   background:
@@ -772,16 +870,33 @@ code {
   z-index: 0;
   display: block;
   width: 100%;
-  min-height: 420px;
+  min-height: 340px;
   object-fit: cover;
   background: #020813;
   filter: saturate(0.92) contrast(1.02);
 }
 
+.webcam-overlay {
+  position: absolute;
+  inset: 0;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.webcam-overlay--visible {
+  opacity: 1;
+}
+
 .webcam-placeholder {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -794,6 +909,55 @@ code {
 
 .webcam-placeholder strong {
   font-size: 1.05rem;
+}
+
+.webcam-bottom-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.7fr);
+  gap: 0.8rem;
+  align-items: start;
+  margin-top: 0.75rem;
+}
+
+.webcam-status-stack {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.secondary-actions-panel {
+  display: flex;
+  align-items: stretch;
+}
+
+.release-summary {
+  display: grid;
+  gap: 0.22rem;
+  width: 100%;
+  padding: 0.82rem 0.9rem;
+  border-radius: var(--radius-soft);
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.release-summary__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.release-summary__meta {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.advanced-actions {
+  margin-top: 0.85rem;
+}
+
+.topk-block--details {
+  margin-top: 0.85rem;
 }
 
 .hidden-canvas {
@@ -825,6 +989,14 @@ code {
     position: relative;
     top: auto;
   }
+
+  .meta-grid--camera {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .webcam-bottom-bar {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -855,9 +1027,16 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .control-grid--camera,
-  .control-grid--inference {
+  .hero-meta {
     grid-template-columns: 1fr;
+  }
+
+  .control-toolbar,
+  .toolbar-group,
+  .toolbar-actions,
+  .capture-speed-options {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .prediction-hero {
@@ -880,5 +1059,10 @@ code {
   .webcam-stage,
   .webcam-video {
     min-height: 260px;
+  }
+
+  .control-button--compact,
+  .capture-speed-option {
+    min-height: 3rem;
   }
 }

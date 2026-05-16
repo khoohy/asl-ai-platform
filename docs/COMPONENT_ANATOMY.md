@@ -2,6 +2,8 @@
 
 This document explains the current structure of `asl-ai-platform` as a junior AI engineer portfolio project. The repository is intentionally split into a frontend application layer, a FastAPI backend layer, and an ML runtime layer that ports only the minimum production pieces from the older ASL project.
 
+The older ASL project reported that iterative live-runtime refinement improved operational success from about `82.7%` to `91.67%` during 300-sign live testing. In this platform repo, that improvement is treated as a runtime-layer concern rather than a model-retraining story. The production checkpoint, `180D` feature contract, and `30`-frame temporal input remain unchanged; the gain comes from portable decision logic, state handling, and live usability controls now housed in the FastAPI backend runtime layer.
+
 ## A. System overview
 
 The current system is a browser-to-backend ASL inference prototype with these layers:
@@ -10,6 +12,7 @@ The current system is a browser-to-backend ASL inference prototype with these la
   - opens the webcam
   - captures frames manually or on a timed loop
   - sends base64 image frames to the backend
+  - runs a browser-side hand keypoint overlay loop for immediate visual feedback
 - FastAPI backend
   - exposes health, mock inference, frame-debug, real frame inference, and session reset routes
   - keeps lightweight endpoints fast by avoiding model loading on module import
@@ -26,12 +29,18 @@ The current system is a browser-to-backend ASL inference prototype with these la
   - runs the real BiLSTM-based production model on a `1 x 30 x 180` tensor
 - Raw Top-K prediction output
   - returns unstabilized Top-K labels and confidences from the model
+- Frontend overlay path
+  - draws hand keypoints directly from the live webcam feed in the browser
+  - does not drive inference decisions
 - Stabilization layer
   - converts raw model guesses into more usable live output through confidence, vote, peak, confusion, and motion checks
 - Idle-state recovery
   - preserves context briefly when hands disappear
   - clears runtime state after prolonged hand loss
   - returns back to waiting instead of predicting from stale buffers
+- Runtime-tuning parity
+  - ports the old live deployment heuristics that helped raise operational success from about `82.7%` to `91.67%`
+  - keeps that tuning in backend decision logic instead of changing the model checkpoint
 
 ## B. Frontend anatomy
 
@@ -41,7 +50,6 @@ Responsibility:
 
 - top-level orchestration for frontend data flow
 - manages backend health state
-- manages mock inference state
 - manages real inference response state, including raw and stabilized fields
 - passes callbacks and result state into UI components
 
@@ -50,14 +58,12 @@ Important state and props:
 - `health`
 - `prediction`
 - `healthError`
-- `manualInferenceError`
 - `realInferenceError`
-- loading flags for health, mock inference, real inference, and session reset
+- loading flags for health, real inference, and session reset
 
 API calls used:
 
 - `fetchHealth()`
-- `runMockInference()`
 - `runRealInference()`
 - `resetRealInferenceSession()`
 
@@ -83,6 +89,7 @@ API calls used:
 
 - `GET /health`
 - `POST /api/inference/mock`
+- `POST /api/inference/frame-debug`
 - `POST /api/inference/frame`
 - `POST /api/inference/reset-session`
 
@@ -91,54 +98,12 @@ How it interacts with inference flow:
 - converts frontend actions into backend requests
 - ensures all UI components use the same backend URL and response parsing behavior
 
-### `frontend/src/components/HealthStatus.jsx`
-
-Responsibility:
-
-- display backend service availability and metadata
-
-Important state and props:
-
-- `health`
-- `isLoading`
-- `error`
-- `onRefresh`
-
-API calls used:
-
-- indirectly triggers `fetchHealth()` through `onRefresh`
-
-How it interacts with inference flow:
-
-- does not participate in inference directly
-- provides confidence that the backend is reachable before webcam inference begins
-
-### `frontend/src/components/MockInferencePanel.jsx`
-
-Responsibility:
-
-- preserve the original placeholder mock inference path for comparison and debugging
-
-Important state and props:
-
-- `isLoading`
-- `error`
-- `onRunInference`
-
-API calls used:
-
-- indirectly uses `POST /api/inference/mock`
-
-How it interacts with inference flow:
-
-- separate from the real inference pipeline
-- useful for confirming frontend/backend communication independently of model and MediaPipe behavior
-
 ### `frontend/src/components/WebcamPanel.jsx`
 
 Responsibility:
 
 - manage browser webcam access
+- run a browser-side hand keypoint overlay loop
 - capture frames from the live video preview
 - support manual real inference
 - support continuous real inference loop
@@ -163,6 +128,9 @@ Important state and props:
   - `intervalRef`
   - `requestInFlightRef`
   - `runRealInferenceRef`
+  - `overlayCanvasRef`
+  - `handLandmarkerRef`
+  - `animationFrameRef`
 - props:
   - `isLoading`
   - `isResetting`
@@ -175,13 +143,16 @@ API calls used:
 
 - indirectly uses `POST /api/inference/frame`
 - indirectly uses `POST /api/inference/reset-session`
+- does not call backend debug routes during normal live overlay rendering
 
 How it interacts with inference flow:
 
+- runs browser-side hand landmark detection for immediate on-screen feedback
 - captures the current video frame into a hidden canvas
 - converts that frame to base64
 - sends the frame into the app-level real inference callback
 - on continuous mode, repeats that process at a fixed interval while skipping ticks if the previous request has not finished
+- keeps the overlay loop independent from backend inference so keypoints do not lag behind the live video due to round-trip latency
 
 ### `frontend/src/components/PredictionCard.jsx`
 
@@ -215,6 +186,7 @@ How it interacts with inference flow:
   - model source
   - Top-K list
 - acts as the main feedback surface for the user during warm-up, raw prediction, and stabilized output
+- keeps raw Top-K and runtime details secondary under `Advanced details`
 
 ### `frontend/src/index.css`
 
@@ -448,6 +420,7 @@ Input and output:
 Dependency on old ASL system:
 
 - mirrors the production assumptions and runtime heuristics documented in the old system
+- carries the ported live-tuning values that were instrumental to the old runtime improvement from about `82.7%` to `91.67%`
 
 Why it exists in the platform repo:
 
@@ -552,6 +525,7 @@ Dependency on old ASL system:
 Why it exists in the platform repo:
 
 - session-local buffering and prediction history are application concerns, not training concerns
+- it also stores the hold, cooldown, and missing-hand state needed to preserve the old runtime's live usability behavior
 
 ### `backend/app/ml/session_manager.py`
 
@@ -608,6 +582,7 @@ Dependency on old ASL system:
 Why it exists in the platform repo:
 
 - it is the platform-level runtime orchestrator that bridges API input to raw model output and stabilized live feedback
+- this is where the unchanged model path is wrapped with the live decision logic that made the old system operationally stronger in practice
 
 ### `backend/app/ml/stabilization.py`
 
@@ -632,6 +607,7 @@ Input and output:
 Dependency on old ASL system:
 
 - directly inspired by the old desktop runtime logic in `src/main.py` and the associated config values in `src/utils/config.py`
+- ports the runtime-layer heuristics that were cited in the old report as instrumental to improving live operational success from about `82.7%` to `91.67%`
 
 Why it exists in the platform repo:
 
@@ -642,29 +618,31 @@ Why it exists in the platform repo:
 The current real inference lifecycle is:
 
 1. User starts the camera in the frontend.
-2. The frontend captures a frame from the `<video>` element.
-3. The frame is drawn to a hidden `<canvas>`.
-4. The canvas is encoded as a base64 JPEG string.
-5. The frontend sends `POST /api/inference/frame`.
-6. The backend receives `image_base64` and an optional `session_id`.
-7. The frame processor strips any data URL prefix.
-8. The backend base64-decodes the image bytes.
-9. OpenCV decodes the bytes into an image frame.
-10. MediaPipe extracts hand, pose, and face landmarks.
-11. The preprocessing layer constructs the production-aligned 180D feature vector.
-12. The session manager retrieves or creates the runtime session state.
-13. If no hands are visible, the backend increments the missing-hands counter.
-14. During the grace window, the backend returns `holding_context` and keeps the current buffer without appending invalid frames.
-15. After the grace window expires, the backend clears the rolling buffer and stabilization history and returns `waiting_for_hands`.
-16. If hands are visible, the runtime session appends the valid 180D vector to the rolling buffer.
-17. If the buffer holds fewer than 30 valid frames, the backend returns `warming_up`.
-18. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
-19. The PyTorch model runs a forward pass under `torch.no_grad()`.
-20. Softmax probabilities are computed.
-21. The Top-K class indices are mapped to labels with the label map.
-22. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
-23. The backend returns both raw and stabilized prediction data to the frontend.
-24. The frontend updates status, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
+2. A browser-side MediaPipe Tasks hand detector reads the live `<video>` frames and draws hand keypoints directly on the overlay canvas for low-latency feedback.
+3. The frontend captures a frame from the `<video>` element for backend inference.
+4. The frame is drawn to a hidden `<canvas>`.
+5. The canvas is encoded as a base64 JPEG string.
+6. The frontend sends `POST /api/inference/frame`.
+7. The backend receives `image_base64` and an optional `session_id`.
+8. The frame processor strips any data URL prefix.
+9. The backend base64-decodes the image bytes.
+10. OpenCV decodes the bytes into an image frame.
+11. Backend MediaPipe extracts hand, pose, and face landmarks.
+12. The preprocessing layer constructs the production-aligned 180D feature vector.
+13. The session manager retrieves or creates the runtime session state.
+14. If no hands are visible, the backend increments the missing-hands counter.
+15. During the grace window, the backend returns `holding_context` and keeps the current buffer without appending invalid frames.
+16. After the grace window expires, the backend clears the rolling buffer and stabilization history and returns `waiting_for_hands`.
+17. If hands are visible, the runtime session appends the valid 180D vector to the rolling buffer.
+18. If the buffer holds fewer than 30 valid frames, the backend returns `warming_up`.
+19. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
+20. The PyTorch model runs a forward pass under `torch.no_grad()`.
+21. Softmax probabilities are computed.
+22. The Top-K class indices are mapped to labels with the label map.
+23. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
+24. The backend can briefly hold the last accepted stable sign during weak transition frames so random in-between guesses do not immediately replace it.
+25. The backend returns raw and stabilized prediction data to the frontend.
+26. The frontend updates status, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
 
 ## F. Current limitations
 
@@ -678,6 +656,7 @@ Current limitations:
 - frontend capture is browser-loop based rather than server-pushed streaming
 - stabilization is still tuned for isolated sign recognition, not full continuous sentence translation
 - no TTS or speech-style cooldown output layer
+- runtime tuning parity is now strong for the portable backend decision logic, but it still does not turn the system into continuous sentence translation
 
 ## G. Next planned phase
 

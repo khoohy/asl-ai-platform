@@ -14,9 +14,14 @@ from app.ml.runtime_config import (
     HOLDING_CONTEXT_STATUS,
     IDLE_STATUS,
     INPUT_DIM,
+    MIN_FRAMES_BETWEEN_STABLE_OUTPUTS,
     MODEL_SOURCE,
     SEQUENCE_LENGTH,
+    STABLE_OUTPUT_HOLD_FRAMES,
     TOP_K,
+    TRANSITION_COOLDOWN_FRAMES,
+    TRANSITIONING_STATUS,
+    COLLECTING_EVIDENCE_STATUS,
     WAITING_FOR_HANDS_STATUS,
 )
 from app.ml.session_manager import SessionManager
@@ -56,6 +61,7 @@ class RuntimeInferenceEngine:
 
         session = self.session_manager.get_session(session_id)
         session.total_frames_received += 1
+        session.advance_output_timers()
 
         frame_result = frame_processor.process_base64_image(image_base64)
         if frame_result.status in {"no_hands", "no_landmarks"}:
@@ -75,6 +81,7 @@ class RuntimeInferenceEngine:
                     f"{session.valid_frames_collected}/{session.sequence_length}."
                 ),
                 hands_detected=True,
+                keypoint_overlay=frame_result.keypoint_overlay,
             )
 
         session.is_idle = False
@@ -92,6 +99,7 @@ class RuntimeInferenceEngine:
                     f"{session.valid_frames_collected}/{session.sequence_length}"
                 ),
                 hands_detected=True,
+                keypoint_overlay=frame_result.keypoint_overlay,
             )
 
         sequence = session.stack_sequence()
@@ -124,7 +132,6 @@ class RuntimeInferenceEngine:
                 }
             )
 
-        prediction = top_k_predictions[0] if top_k_predictions else None
         stabilizer = self._get_stabilizer()
         stabilization = stabilizer.stabilize(
             session=session,
@@ -132,36 +139,15 @@ class RuntimeInferenceEngine:
             motion_delta=motion_delta,
         )
 
-        session.last_prediction = {
-            "prediction": stabilization.prediction,
-            "confidence": stabilization.confidence,
-            "top_k": top_k_predictions,
-            "raw_prediction": stabilization.raw_prediction,
-            "raw_confidence": stabilization.raw_confidence,
-            "stable_prediction": stabilization.stable_prediction,
-            "stable_confidence": stabilization.stable_confidence,
-            "stabilization_status": stabilization.stabilization_status,
-            "vote_count": stabilization.vote_count,
-            "vote_window_size": stabilization.vote_window_size,
-        }
-        session.last_status = self._map_status(stabilization.stabilization_status)
-
-        return self._base_response(
+        response = self._build_prediction_response(
             session=session,
-            status=session.last_status,
-            note=stabilization.note,
-            prediction=stabilization.prediction,
-            confidence=stabilization.confidence,
+            stabilization=stabilization,
             top_k=top_k_predictions,
-            hands_detected=True,
-            raw_prediction=stabilization.raw_prediction,
-            raw_confidence=stabilization.raw_confidence,
-            stable_prediction=stabilization.stable_prediction,
-            stable_confidence=stabilization.stable_confidence,
-            stabilization_status=stabilization.stabilization_status,
-            vote_count=stabilization.vote_count,
-            vote_window_size=stabilization.vote_window_size,
+            keypoint_overlay=frame_result.keypoint_overlay,
         )
+        session.last_prediction = response
+        session.last_status = str(response["status"])
+        return response
 
     def reset_session(self, session_id: str | None = None) -> dict[str, str]:
         if self.session_manager is None:
@@ -186,6 +172,7 @@ class RuntimeInferenceEngine:
         if session.valid_frames_collected > 0 and session.missing_hands_count <= HAND_LOSS_GRACE_FRAMES:
             session.last_status = HOLDING_CONTEXT_STATUS
             session.is_idle = False
+            held_prediction, held_confidence = self._get_held_display_prediction(session)
             return self._base_response(
                 session=session,
                 status=HOLDING_CONTEXT_STATUS,
@@ -195,9 +182,19 @@ class RuntimeInferenceEngine:
                     f"Grace remaining: {session.hand_grace_remaining}/{HAND_LOSS_GRACE_FRAMES}. "
                     "No new frame was added."
                 ),
+                prediction=held_prediction,
+                confidence=held_confidence,
                 hands_detected=False,
                 missing_hands_count=session.missing_hands_count,
                 grace_frames_remaining=session.hand_grace_remaining,
+                raw_prediction=None,
+                raw_confidence=0.0,
+                stable_prediction=held_prediction,
+                stable_confidence=held_confidence,
+                stabilization_status=(
+                    "holding_output" if held_prediction is not None else "holding_context"
+                ),
+                keypoint_overlay=frame_result.keypoint_overlay,
             )
 
         session.clear_runtime_context()
@@ -214,6 +211,109 @@ class RuntimeInferenceEngine:
             hands_detected=False,
             missing_hands_count=session.missing_hands_count,
             grace_frames_remaining=0,
+            keypoint_overlay=frame_result.keypoint_overlay,
+        )
+
+    def _build_prediction_response(
+        self,
+        session,
+        stabilization,
+        top_k: list[dict[str, float | str]],
+        keypoint_overlay: dict[str, list[list[float]]],
+    ) -> dict[str, Any]:
+        new_stable_prediction = stabilization.stable_prediction
+        new_stable_confidence = stabilization.stable_confidence
+
+        if new_stable_prediction is not None:
+            if (
+                session.last_stable_prediction is not None
+                and new_stable_prediction != session.last_stable_prediction
+                and session.stable_output_cooldown_remaining > 0
+            ):
+                held_prediction, held_confidence = self._get_held_display_prediction(session)
+                return self._base_response(
+                    session=session,
+                    status=TRANSITIONING_STATUS,
+                    note=(
+                        f"Holding {held_prediction} briefly before accepting a new sign. "
+                        "Collecting evidence for the next stable output."
+                    ),
+                    prediction=held_prediction,
+                    confidence=held_confidence,
+                    top_k=top_k,
+                    hands_detected=True,
+                    raw_prediction=stabilization.raw_prediction,
+                    raw_confidence=stabilization.raw_confidence,
+                    stable_prediction=held_prediction,
+                    stable_confidence=held_confidence,
+                    stabilization_status="holding_output",
+                    vote_count=stabilization.vote_count,
+                    vote_window_size=stabilization.vote_window_size,
+                    keypoint_overlay=keypoint_overlay,
+                )
+
+            session.last_stable_prediction = new_stable_prediction
+            session.last_stable_confidence = new_stable_confidence
+            session.stable_output_hold_remaining = STABLE_OUTPUT_HOLD_FRAMES
+            session.stable_output_cooldown_remaining = MIN_FRAMES_BETWEEN_STABLE_OUTPUTS
+            session.transition_cooldown_remaining = TRANSITION_COOLDOWN_FRAMES
+            return self._base_response(
+                session=session,
+                status="stabilized",
+                note=stabilization.note,
+                prediction=new_stable_prediction,
+                confidence=new_stable_confidence,
+                top_k=top_k,
+                hands_detected=True,
+                raw_prediction=stabilization.raw_prediction,
+                raw_confidence=stabilization.raw_confidence,
+                stable_prediction=new_stable_prediction,
+                stable_confidence=new_stable_confidence,
+                stabilization_status=stabilization.stabilization_status,
+                vote_count=stabilization.vote_count,
+                vote_window_size=stabilization.vote_window_size,
+                keypoint_overlay=keypoint_overlay,
+            )
+
+        held_prediction, held_confidence = self._get_held_display_prediction(session)
+        if held_prediction is not None:
+            return self._base_response(
+                session=session,
+                status=TRANSITIONING_STATUS,
+                note=(
+                    "Transitioning between signs. Holding the last accepted sign "
+                    "briefly while collecting evidence for the next one."
+                ),
+                prediction=held_prediction,
+                confidence=held_confidence,
+                top_k=top_k,
+                hands_detected=True,
+                raw_prediction=stabilization.raw_prediction,
+                raw_confidence=stabilization.raw_confidence,
+                stable_prediction=held_prediction,
+                stable_confidence=held_confidence,
+                stabilization_status="holding_output",
+                vote_count=stabilization.vote_count,
+                vote_window_size=stabilization.vote_window_size,
+                keypoint_overlay=keypoint_overlay,
+            )
+
+        return self._base_response(
+            session=session,
+            status=COLLECTING_EVIDENCE_STATUS,
+            note="Collecting evidence for the next sign. Raw candidates remain secondary until stabilization accepts a new output.",
+            prediction=None,
+            confidence=0.0,
+            top_k=top_k,
+            hands_detected=True,
+            raw_prediction=stabilization.raw_prediction,
+            raw_confidence=stabilization.raw_confidence,
+            stable_prediction=None,
+            stable_confidence=0.0,
+            stabilization_status=stabilization.stabilization_status,
+            vote_count=stabilization.vote_count,
+            vote_window_size=stabilization.vote_window_size,
+            keypoint_overlay=keypoint_overlay,
         )
 
     def _get_model_loader(self) -> ASLModelLoader:
@@ -255,6 +355,18 @@ class RuntimeInferenceEngine:
         }
         return mapping.get(stabilization_status, "raw_predicted")
 
+    @staticmethod
+    def _get_held_display_prediction(session) -> tuple[str | None, float]:
+        if (
+            session.last_stable_prediction is not None
+            and (
+                session.stable_output_hold_remaining > 0
+                or session.transition_cooldown_remaining > 0
+            )
+        ):
+            return session.last_stable_prediction, session.last_stable_confidence
+        return None, 0.0
+
     def _base_response(
         self,
         session,
@@ -273,6 +385,7 @@ class RuntimeInferenceEngine:
         stabilization_status: str = "raw_only",
         vote_count: int = 0,
         vote_window_size: int = 10,
+        keypoint_overlay: dict[str, list[list[float]]] | None = None,
     ) -> dict[str, Any]:
         return {
             "prediction": prediction,
@@ -301,4 +414,6 @@ class RuntimeInferenceEngine:
             "frames_collected": session.valid_frames_collected,
             "sequence_length": session.sequence_length,
             "note": note,
+            "keypoint_overlay": keypoint_overlay
+            or {"left_hand": [], "right_hand": [], "pose": [], "face": []},
         }

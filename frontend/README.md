@@ -1,21 +1,24 @@
 # Frontend
 
-Phase 4E adds runtime stabilization on top of the continuous 30-frame real inference flow.
+The frontend now behaves like a release-style live ASL recognition client rather than a test dashboard.
 
-## Features in this phase
+## Visible product flow
 
-- dashboard shell for `ASL AI Platform`
-- responsive live inference layout with webcam and prediction visible together on desktop
-- backend health status panel
-- webcam panel with browser camera access
-- single-frame capture to base64
-- continuous automatic frame capture for real inference
-- webcam-triggered real inference request
-- in-memory real inference session reset
-- stabilized prediction display on top of raw Top-K output
-- separate manual mock inference test panel
-- prediction display card
-- loading and error states for API calls
+- compact live recognition layout with webcam left and prediction right on desktop
+- short top status cards for:
+  - backend connection
+  - mode
+  - session
+- default webcam keypoint overlay
+- user-facing controls:
+  - `Start Camera`
+  - `Stop Camera`
+  - `Show Keypoints`
+  - `Start Recognition`
+  - `Stop Recognition`
+  - `Reset`
+- stabilized recognition display as the main output
+- raw Top-K and manual single-frame capture moved under `Advanced details`
 
 ## Required backend URL
 
@@ -51,7 +54,7 @@ The Vite dev server runs at `http://127.0.0.1:5173`.
 
 ## Backend requirement
 
-The FastAPI backend must already be running on `http://127.0.0.1:8000` for the dashboard to load health data and run mock inference.
+The FastAPI backend must already be running on `http://127.0.0.1:8000` for the dashboard to load health data, preview keypoints, and run real recognition.
 
 Run both services:
 
@@ -81,72 +84,64 @@ The UI handles common camera states such as:
 - stabilized output
 - backend request failure
 
-## Current mock request
-
-The manual mock test button sends this placeholder base64 value to the backend mock endpoint:
-
-```text
-abcdefghijklmnop
-```
-
-The webcam flow now supports two paths:
-
-- manual mock inference through the placeholder endpoint
-- manual real inference through the 30-frame rolling model buffer
-- continuous real inference through a timed capture loop
-
 ## Continuous real inference
 
 The frontend now supports:
 
 - `Start Camera`
 - `Stop Camera`
-- `Capture frame and run real inference`
-- `Start Real Inference Session`
-- `Stop Real Inference Session`
-- `Reset Real Inference Session`
+- `Show Keypoints`
+- `Start Recognition`
+- `Stop Recognition`
+- `Reset`
 
-The continuous capture loop starts at a safe interval of `200ms` per frame, which is about `5 FPS`.
+The live capture loop is now fixed to the fastest validated setting:
+
+- `100ms` per frame
+- about `10 FPS`
 
 Only one request is allowed in flight at a time. If a frame request is still running, the next timer tick is skipped instead of queueing overlapping requests.
 
-## What Phase 4E adds
+## Keypoint overlay
 
-This phase proves that the browser can:
+- Keypoints are shown by default.
+- The visible webcam overlay now runs in the browser with MediaPipe Tasks hand landmark detection.
+- The overlay updates from the live video element instead of waiting for backend responses.
+- The current overlay is hand-only for lower latency and lighter browser load.
+- Backend MediaPipe preprocessing still remains the source of truth for model inference.
+- `POST /api/inference/frame-debug` remains available for backend debugging, but it is not used during normal live camera use.
+
+## Runtime behavior
+
+- The main recognition output now prefers stabilized signs only.
+- After a stable sign is accepted, the backend briefly holds that accepted output during short transitions instead of immediately swapping to weak random guesses.
+- If hands disappear:
+  - the system first enters `holding_context`
+  - then returns to `waiting_for_hands`
+  - and clears stale sequence state after the grace window
+
+## What the browser now does
 
 - open the webcam
-- show a live preview
-- capture one frame
-- encode it as base64
-- send it to the raw sequence inference endpoint
-- warm up a 30-frame rolling session buffer
-- continue sending frames automatically after the session starts
-- display raw Top-K model output once the buffer reaches 30 valid frames
-- show when the backend is still collecting votes
-- show when a stable output has been accepted
-- show when the output is held for low confidence, confusion, or motion reasons
+- show a live preview with keypoints
+- send frames continuously to the real recognition endpoint
+- warm up the 30-frame rolling session buffer
+- display stabilized recognition as the main output
+- keep raw Top-K as secondary information under `Advanced details`
+- avoid spamming accepted words during sign transitions
 
 ## Live dashboard layout
 
 - desktop:
-  - larger left column for webcam preview and capture controls
-  - right column for sticky live prediction output, stabilization state, compact Top-K, and collapsible runtime stats
+  - larger left column for webcam preview and recognition controls
+  - right column for sticky live recognition output
 - mobile:
   - webcam and prediction stack vertically
   - the prediction card stays directly under the webcam section
 
-## Raw prediction note
-
-Phase 4E preserves raw predictions but adds a stabilization layer. The UI now shows both:
-
-- raw prediction fields
-- stabilized prediction fields
-
-The backend still performs isolated sign recognition only. It does not yet implement sentence-level translation, WebSocket streaming, or TTS.
-
 ## Coming later
 
-Phase 4F can build on the stabilized backend with further UX and runtime improvements.
+Future phases can still add richer transport and deployment support, but the current UI is intentionally focused on isolated live sign recognition.
 
 Not included yet:
 

@@ -16,13 +16,6 @@ class MockInferenceResponse(BaseModel):
     note: str
 
 
-class FrameDebugResponse(BaseModel):
-    status: str
-    feature_dim: int
-    expected_dim: int
-    note: str
-
-
 class RealInferenceRequest(BaseModel):
     image_base64: str = Field(
         ...,
@@ -38,6 +31,22 @@ class RealInferenceRequest(BaseModel):
 class TopKPrediction(BaseModel):
     label: str
     confidence: float
+
+
+class KeypointOverlay(BaseModel):
+    left_hand: list[list[float]] = Field(default_factory=list)
+    right_hand: list[list[float]] = Field(default_factory=list)
+    pose: list[list[float]] = Field(default_factory=list)
+    face: list[list[float]] = Field(default_factory=list)
+
+
+class FrameDebugResponse(BaseModel):
+    status: str
+    feature_dim: int
+    expected_dim: int
+    note: str
+    hands_detected: bool = False
+    keypoint_overlay: KeypointOverlay = Field(default_factory=KeypointOverlay)
 
 
 class RealInferenceResponse(BaseModel):
@@ -59,6 +68,7 @@ class RealInferenceResponse(BaseModel):
     frames_collected: int
     sequence_length: int
     note: str
+    keypoint_overlay: KeypointOverlay = Field(default_factory=KeypointOverlay)
 
 
 class ResetSessionRequest(BaseModel):

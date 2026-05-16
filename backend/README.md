@@ -93,3 +93,46 @@ python backend\scripts\test_idle_state.py
 ```
 
 - This phase restores the old “Holding context” and “Waiting for hands” behavior without changing the model checkpoint or preprocessing format.
+## Release refinement: transition hold and keypoint overlay
+
+- The real inference response now includes a lightweight `keypoint_overlay` payload for:
+  - left hand
+  - right hand
+  - selected pose landmarks
+  - selected face landmarks
+- The frontend uses that overlay to draw keypoints on the webcam by default.
+- The backend now keeps the last accepted stable sign visible for a short transition window instead of immediately promoting weak in-between guesses.
+- Added runtime constants for:
+  - `STABLE_OUTPUT_HOLD_FRAMES`
+  - `MIN_FRAMES_BETWEEN_STABLE_OUTPUTS`
+  - `TRANSITION_COOLDOWN_FRAMES`
+- Current behavior:
+  - accepted signs remain visible briefly while the next sign is forming
+  - `holding_context` still handles short hand loss
+  - `waiting_for_hands` still clears stale state after the grace period
+  - raw Top-K remains available as secondary output rather than the primary user-facing recognition
+
+## Runtime tuning parity
+
+- The old ASL project reported that iterative live-runtime refinement improved operational success from about `82.7%` to `91.67%` during 300-sign live testing.
+- In this platform repo, that improvement is treated as runtime-layer behavior rather than a model retraining change.
+- The following production assumptions remain unchanged:
+  - checkpoint: `backend/models/asl_wlasl300_realtime.pt`
+  - preprocessing contract: `180D` per frame
+  - temporal input: `30` frames per sequence
+- The FastAPI backend now carries the portable tuning logic from the old runtime layer, including:
+  - per-sign confidence overrides
+  - confusion-pair suppression
+  - peak-sign preservation
+  - sign-specific motion requirements
+  - adaptive lower-confidence acceptance with runner-up margin checks
+  - `10`-prediction vote history with a `6`-vote minimum
+  - no-hands grace handling with `holding_context` and `waiting_for_hands`
+  - stable-output hold and cooldown behavior to reduce random between-sign word flashes
+- Focused parity smoke test:
+
+```powershell
+python backend\scripts\test_runtime_tuning_parity.py
+```
+
+- This parity work does not retrain the model or change the checkpoint. The practical improvement comes from runtime decision logic and live usability controls layered around the same production model path.

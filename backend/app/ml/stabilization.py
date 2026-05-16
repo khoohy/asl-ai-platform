@@ -82,8 +82,6 @@ class ASLStabilizer:
         if not accept_decision.accepted:
             if peak_sign is not None:
                 peak_confidence = self._lookup_confidence(top_k_predictions, peak_sign)
-                session.last_stable_prediction = peak_sign
-                session.last_stable_confidence = peak_confidence
                 session.stabilization_status = "peak_accepted"
                 return self._result(
                     session=session,
@@ -113,8 +111,6 @@ class ASLStabilizer:
 
         if peak_sign is not None:
             peak_confidence = self._lookup_confidence(top_k_predictions, peak_sign)
-            session.last_stable_prediction = peak_sign
-            session.last_stable_confidence = peak_confidence
             session.stabilization_status = "peak_accepted"
             return self._result(
                 session=session,
@@ -147,8 +143,6 @@ class ASLStabilizer:
             )
 
         stable_confidence = self._lookup_confidence(top_k_predictions, raw_prediction)
-        session.last_stable_prediction = raw_prediction
-        session.last_stable_confidence = stable_confidence
         session.stabilization_status = "stable"
         return self._result(
             session=session,

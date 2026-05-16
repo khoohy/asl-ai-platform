@@ -20,14 +20,14 @@ export async function fetchHealth() {
   return parseJsonResponse(response);
 }
 
-export async function runMockInference() {
+export async function runMockInference(imageBase64 = "abcdefghijklmnop") {
   const response = await fetch(`${API_BASE_URL}/api/inference/mock`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      image_base64: "abcdefghijklmnop",
+      image_base64: imageBase64,
     }),
   });
 

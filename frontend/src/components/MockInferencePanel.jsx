@@ -14,7 +14,8 @@ export default function MockInferencePanel({
 
       <p className="panel-copy">
         Send a placeholder base64 string to the backend mock inference route and
-        display the returned prediction payload.
+        display the returned prediction payload. This remains available as a
+        separate non-webcam test path.
       </p>
 
       <div className="request-preview">
@@ -32,7 +33,8 @@ export default function MockInferencePanel({
       </button>
 
       <p className={`inline-message ${error ? "inline-message--error" : ""}`}>
-        {error ?? 'Payload uses the placeholder string "abcdefghijklmnop".'}
+        {error ??
+          'This button uses the placeholder payload "abcdefghijklmnop".'}
       </p>
     </section>
   );

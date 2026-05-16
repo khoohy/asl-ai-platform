@@ -12,6 +12,7 @@ The repository now includes:
 - `GET /health`
 - `POST /api/inference/mock`
 - React + Vite frontend scaffold
+- browser webcam capture UI wired to the mock backend
 - architecture and integration planning docs
 
 Not included yet:

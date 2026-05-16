@@ -158,6 +158,12 @@ code {
     linear-gradient(135deg, rgba(255, 243, 217, 0.95), rgba(247, 253, 251, 0.88));
 }
 
+.panel--webcam {
+  grid-column: span 8;
+  background:
+    linear-gradient(145deg, rgba(242, 250, 255, 0.92), rgba(255, 248, 241, 0.88));
+}
+
 .panel-header {
   display: flex;
   align-items: flex-start;
@@ -222,6 +228,11 @@ code {
 }
 
 .meta-grid--prediction {
+  margin-top: 1.25rem;
+}
+
+.meta-grid--single {
+  grid-template-columns: 1fr;
   margin-top: 1.25rem;
 }
 
@@ -304,6 +315,57 @@ code {
   color: #102235;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+}
+
+.webcam-stage {
+  position: relative;
+  min-height: 280px;
+  margin: 1rem 0 1rem;
+  border-radius: 22px;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(16, 34, 53, 0.94), rgba(34, 72, 104, 0.88));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.webcam-stage--live {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.webcam-video {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  object-fit: cover;
+  background: #102235;
+}
+
+.webcam-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: rgba(255, 253, 249, 0.9);
+}
+
+.webcam-placeholder strong {
+  font-size: 1.1rem;
+}
+
+.hidden-canvas {
+  display: none;
+}
+
 .inline-message {
   margin: 1rem 0 0;
   color: #4b6278;
@@ -316,6 +378,10 @@ code {
 @media (max-width: 960px) {
   .panel {
     grid-column: span 6;
+  }
+
+  .panel--webcam {
+    grid-column: 1 / -1;
   }
 }
 
@@ -345,5 +411,10 @@ code {
 
   .meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .webcam-stage,
+  .webcam-video {
+    min-height: 220px;
   }
 }

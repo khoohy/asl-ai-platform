@@ -4,14 +4,17 @@ import { API_BASE_URL, fetchHealth, runMockInference } from "./api/client";
 import HealthStatus from "./components/HealthStatus";
 import MockInferencePanel from "./components/MockInferencePanel";
 import PredictionCard from "./components/PredictionCard";
+import WebcamPanel from "./components/WebcamPanel";
 
 export default function App() {
   const [health, setHealth] = useState(null);
   const [prediction, setPrediction] = useState(null);
   const [healthError, setHealthError] = useState("");
-  const [inferenceError, setInferenceError] = useState("");
+  const [manualInferenceError, setManualInferenceError] = useState("");
+  const [webcamInferenceError, setWebcamInferenceError] = useState("");
   const [isHealthLoading, setIsHealthLoading] = useState(true);
-  const [isInferenceLoading, setIsInferenceLoading] = useState(false);
+  const [isManualInferenceLoading, setIsManualInferenceLoading] = useState(false);
+  const [isWebcamInferenceLoading, setIsWebcamInferenceLoading] = useState(false);
 
   async function loadHealth() {
     setIsHealthLoading(true);
@@ -33,21 +36,41 @@ export default function App() {
   }
 
   async function handleRunInference() {
-    setIsInferenceLoading(true);
-    setInferenceError("");
+    setIsManualInferenceLoading(true);
+    setManualInferenceError("");
 
     try {
       const response = await runMockInference();
       setPrediction(response);
     } catch (error) {
       setPrediction(null);
-      setInferenceError(
+      setManualInferenceError(
         error instanceof Error
           ? error.message
           : "Unable to run mock inference.",
       );
     } finally {
-      setIsInferenceLoading(false);
+      setIsManualInferenceLoading(false);
+    }
+  }
+
+  async function handleCaptureAndRunInference(imageBase64) {
+    setIsWebcamInferenceLoading(true);
+    setWebcamInferenceError("");
+
+    try {
+      const response = await runMockInference(imageBase64);
+      setPrediction(response);
+    } catch (error) {
+      setPrediction(null);
+      setWebcamInferenceError(
+        error instanceof Error
+          ? error.message
+          : "Unable to run webcam mock inference.",
+      );
+      throw error;
+    } finally {
+      setIsWebcamInferenceLoading(false);
     }
   }
 
@@ -62,12 +85,12 @@ export default function App() {
 
       <main className="dashboard">
         <section className="hero">
-          <p className="eyebrow">Phase 2 frontend scaffold</p>
+          <p className="eyebrow">Phase 3 webcam scaffold</p>
           <h1>ASL AI Platform</h1>
           <p className="hero-copy">
-            A clean React dashboard for validating backend availability and
-            testing the mock ASL inference flow before real webcam and model
-            integration arrive in Phase 3.
+            A browser-first dashboard for validating backend availability,
+            capturing a webcam frame, and testing the mock ASL inference flow
+            before real model integration arrives later.
           </p>
 
           <div className="hero-meta">
@@ -77,7 +100,7 @@ export default function App() {
             </div>
             <div>
               <span className="hero-label">Current mode</span>
-              <strong>Mock inference only</strong>
+              <strong>Webcam capture with mock inference</strong>
             </div>
           </div>
         </section>
@@ -90,9 +113,15 @@ export default function App() {
             onRefresh={loadHealth}
           />
 
+          <WebcamPanel
+            isLoading={isWebcamInferenceLoading}
+            error={webcamInferenceError}
+            onCaptureAndInfer={handleCaptureAndRunInference}
+          />
+
           <MockInferencePanel
-            isLoading={isInferenceLoading}
-            error={inferenceError}
+            isLoading={isManualInferenceLoading}
+            error={manualInferenceError}
             onRunInference={handleRunInference}
           />
 

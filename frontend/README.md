@@ -1,12 +1,15 @@
 # Frontend
 
-Phase 2 adds a React + Vite frontend scaffold that can talk to the existing FastAPI mock backend.
+Phase 3 adds a React + Vite webcam capture flow on top of the existing mock-backend dashboard.
 
 ## Features in this phase
 
 - dashboard shell for `ASL AI Platform`
 - backend health status panel
-- mock inference test panel
+- webcam panel with browser camera access
+- single-frame capture to base64
+- webcam-triggered mock inference request
+- separate manual mock inference test panel
 - prediction display card
 - loading and error states for API calls
 
@@ -46,21 +49,55 @@ The Vite dev server runs at `http://127.0.0.1:5173`.
 
 The FastAPI backend must already be running on `http://127.0.0.1:8000` for the dashboard to load health data and run mock inference.
 
+Run both services:
+
+```powershell
+# terminal 1, from repo root
+uvicorn app.main:app --app-dir backend --reload
+
+# terminal 2, from frontend/
+npm run dev
+```
+
+## Browser webcam permission
+
+When you click `Start Camera`, the browser will ask for webcam permission. You must allow access for the Phase 3 webcam capture flow to work.
+
+The UI handles common camera states such as:
+
+- permission denied
+- no camera found
+- camera already in use
+- capture not ready
+- backend request failure
+
 ## Current mock request
 
-The frontend currently sends this placeholder base64 value to the backend mock endpoint:
+The manual mock test button sends this placeholder base64 value to the backend mock endpoint:
 
 ```text
 abcdefghijklmnop
 ```
 
-## Coming in Phase 3
+The webcam flow captures the current browser video frame, converts it to a base64 image string, and sends that payload to the same mock endpoint.
 
-Phase 3 will introduce real webcam integration and begin connecting the frontend flow to actual ASL model inference.
+## What Phase 3 proves
+
+This phase proves that the browser can:
+
+- open the webcam
+- show a live preview
+- capture one frame
+- encode it as base64
+- send it to the existing mock FastAPI backend
+- display the returned mock prediction
+
+## Coming later
+
+Real ASL model inference will be added in a later phase after the webcam capture path is validated.
 
 Not included yet:
 
-- webcam access
 - real model inference
 - authentication
 - WebSockets

@@ -32,7 +32,7 @@ class SessionManager:
         session.reset()
         return session
 
-    def get_session_metadata(self, session_id: str | None = None) -> dict[str, int | str]:
+    def get_session_metadata(self, session_id: str | None = None) -> dict[str, int | str | bool]:
         session = self.get_session(session_id)
         return {
             "session_id": session.session_id,
@@ -40,4 +40,7 @@ class SessionManager:
             "sequence_length": session.sequence_length,
             "total_frames_received": session.total_frames_received,
             "last_status": session.last_status,
+            "camera_active": session.camera_active,
+            "recognition_active": session.recognition_active,
+            "buffer_ready": session.buffer_warm,
         }

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getHandLandmarker } from "../lib/handLandmarker";
+import { getWebcamControlState } from "./webcamControlState";
 
 const CAPTURE_INTERVAL_MS = 100;
+const CAPTURE_WIDTH = 480;
+const JPEG_QUALITY = 0.6;
 const HAND_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],
   [0, 5], [5, 6], [6, 7], [7, 8],
@@ -15,7 +18,6 @@ const OVERLAY_TARGET_FPS = 30;
 const OVERLAY_FRAME_INTERVAL_MS = Math.round(1000 / OVERLAY_TARGET_FPS);
 
 export default function WebcamPanel({
-  isLoading,
   isResetting,
   error,
   inferenceResult,
@@ -29,12 +31,17 @@ export default function WebcamPanel({
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
   const requestInFlightRef = useRef(false);
+  const recognitionActiveRef = useRef(false);
+  const cameraActiveRef = useRef(false);
   const runRealInferenceRef = useRef(onCaptureAndRunRealInference);
   const handLandmarkerRef = useRef(null);
   const animationFrameRef = useRef(null);
   const lastOverlayTimestampRef = useRef(0);
   const overlayStatusRef = useRef("Keypoints: loading");
   const loggedVideoReadyRef = useRef(false);
+  const successfulResponseCountRef = useRef(0);
+  const cumulativeRequestLatencyMsRef = useRef(0);
+  const successfulResponseWindowStartMsRef = useRef(0);
   const overlayCanvasMetricsRef = useRef({
     stageWidth: 0,
     stageHeight: 0,
@@ -59,6 +66,34 @@ export default function WebcamPanel({
   const [skippedTicks, setSkippedTicks] = useState(0);
   const [showKeypoints, setShowKeypoints] = useState(true);
   const [overlayStatus, setOverlayStatus] = useState("Keypoints: loading");
+  const [latestRequestLatencyMs, setLatestRequestLatencyMs] = useState(0);
+  const [averageRequestLatencyMs, setAverageRequestLatencyMs] = useState(0);
+  const [effectiveResponseFps, setEffectiveResponseFps] = useState(0);
+  const [isStoppingCamera, setIsStoppingCamera] = useState(false);
+
+  const setCameraActiveValue = (nextValue) => {
+    cameraActiveRef.current = nextValue;
+    setIsCameraActive(nextValue);
+  };
+
+  const setRecognitionRunning = (nextValue) => {
+    recognitionActiveRef.current = nextValue;
+    setIsInferenceSessionRunning(nextValue);
+  };
+
+  const resetLocalRuntimeStats = () => {
+    setFramesSent(0);
+    setSuccessfulResponses(0);
+    setFailedResponses(0);
+    setSkippedTicks(0);
+    successfulResponseCountRef.current = 0;
+    cumulativeRequestLatencyMsRef.current = 0;
+    successfulResponseWindowStartMsRef.current = 0;
+    setLatestRequestLatencyMs(0);
+    setAverageRequestLatencyMs(0);
+    setEffectiveResponseFps(0);
+  };
+
   const setOverlayStatusValue = (nextStatus) => {
     if (overlayStatusRef.current === nextStatus) {
       return;
@@ -79,16 +114,24 @@ export default function WebcamPanel({
       failedResponses,
       skippedTicks,
       captureIntervalMs: CAPTURE_INTERVAL_MS,
+      captureWidth: CAPTURE_WIDTH,
+      jpegQuality: JPEG_QUALITY,
       isRequestInFlight,
       isCameraActive,
       isInferenceSessionRunning,
+      latestRequestLatencyMs,
+      averageRequestLatencyMs,
+      effectiveResponseFps,
     });
   }, [
+    averageRequestLatencyMs,
     failedResponses,
+    effectiveResponseFps,
     framesSent,
     isCameraActive,
     isInferenceSessionRunning,
     isRequestInFlight,
+    latestRequestLatencyMs,
     onRuntimeStatsChange,
     skippedTicks,
     successfulResponses,
@@ -172,23 +215,65 @@ export default function WebcamPanel({
 
   function stopInferenceSession(options = {}) {
     const { updateStatus = true } = options;
+    setRecognitionRunning(false);
 
+    if (updateStatus) {
+      setCaptureStatus(
+        isCameraActive
+          ? "Recognition stopped. Buffer stays warm while the camera remains on."
+          : "Recognition stopped.",
+      );
+    }
+  }
+
+  function stopCaptureLoop() {
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+  }
 
-    requestInFlightRef.current = false;
-    setIsRequestInFlight(false);
-    setIsInferenceSessionRunning(false);
-
-    if (updateStatus) {
-      setCaptureStatus("Recognition stopped.");
+  async function runCaptureTick(source) {
+    if (!cameraActiveRef.current) {
+      return;
     }
+
+    if (requestInFlightRef.current) {
+      setSkippedTicks((count) => count + 1);
+      return;
+    }
+
+    requestInFlightRef.current = true;
+    setIsRequestInFlight(true);
+
+    try {
+      await captureAndSendFrame({
+        source,
+        recognitionActive: recognitionActiveRef.current,
+      });
+    } catch (captureError) {
+      return;
+    } finally {
+      requestInFlightRef.current = false;
+      setIsRequestInFlight(false);
+    }
+  }
+
+  function startCaptureLoop() {
+    if (intervalRef.current !== null) {
+      return;
+    }
+
+    intervalRef.current = window.setInterval(() => {
+      void runCaptureTick("loop");
+    }, CAPTURE_INTERVAL_MS);
   }
 
   function releaseCamera(shouldUpdateState = true) {
     stopInferenceSession({ updateStatus: false });
+    stopCaptureLoop();
+    requestInFlightRef.current = false;
+    setIsRequestInFlight(false);
     stopOverlayLoop();
 
     const stream = streamRef.current;
@@ -203,9 +288,10 @@ export default function WebcamPanel({
     }
 
     if (shouldUpdateState) {
-      setIsCameraActive(false);
+      setCameraActiveValue(false);
       setCameraError("");
       setCameraStatus("Camera stopped. You can start it again at any time.");
+      setCaptureStatus("Camera stopped. Buffer cleared.");
       loggedVideoReadyRef.current = false;
       setOverlayStatusValue(
         showKeypoints ? "Keypoints: no hands" : "Keypoints: off",
@@ -214,8 +300,17 @@ export default function WebcamPanel({
     }
   }
 
-  function stopCamera() {
-    releaseCamera(true);
+  async function stopCamera() {
+    setIsStoppingCamera(true);
+    try {
+      releaseCamera(true);
+      const response = await onResetRealInferenceSession();
+      if (response?.status === "reset") {
+        resetLocalRuntimeStats();
+      }
+    } finally {
+      setIsStoppingCamera(false);
+    }
   }
 
   async function startCamera() {
@@ -242,38 +337,79 @@ export default function WebcamPanel({
         await videoRef.current.play();
       }
 
-      setIsCameraActive(true);
+      setCameraActiveValue(true);
       setCameraStatus("Camera ready.");
-      setCaptureStatus("Recognition is ready.");
+      setCaptureStatus("Camera ready. Buffer warming in background.");
+      setRecognitionRunning(false);
+      resetLocalRuntimeStats();
       setOverlayStatusValue(
         handLandmarkerRef.current ? "Keypoints: no hands" : "Keypoints: loading",
       );
       if (showKeypoints) {
         startOverlayLoop();
       }
+      startCaptureLoop();
+      void runCaptureTick("camera-start");
     } catch (cameraStartError) {
       const message = getCameraErrorMessage(cameraStartError);
       setCameraError(message);
       setCameraStatus(message);
-      setIsCameraActive(false);
+      setCameraActiveValue(false);
     } finally {
       setIsStartingCamera(false);
     }
   }
 
-  async function captureAndSendFrame({ source }) {
+  async function captureAndSendFrame({ source, recognitionActive }) {
     const imageBase64 = captureFrameToBase64();
+    const requestStartedAt = performance.now();
     setFramesSent((count) => count + 1);
 
     try {
-      const response = await runRealInferenceRef.current(imageBase64);
+      const response = await runRealInferenceRef.current(imageBase64, {
+        recognitionActive,
+        source,
+      });
+      const requestLatencyMs = performance.now() - requestStartedAt;
+      if (!successfulResponseWindowStartMsRef.current) {
+        successfulResponseWindowStartMsRef.current = requestStartedAt;
+      }
+      successfulResponseCountRef.current += 1;
+      cumulativeRequestLatencyMsRef.current += requestLatencyMs;
+      setLatestRequestLatencyMs(requestLatencyMs);
+      setAverageRequestLatencyMs(
+        cumulativeRequestLatencyMsRef.current / successfulResponseCountRef.current,
+      );
+      const elapsedMs = performance.now() - successfulResponseWindowStartMsRef.current;
+      setEffectiveResponseFps(
+        elapsedMs > 0
+          ? successfulResponseCountRef.current / (elapsedMs / 1000)
+          : 0,
+      );
       setSuccessfulResponses((count) => count + 1);
 
       if (source === "manual") {
         setCaptureStatus("Single recognition frame submitted.");
+      } else if (
+        response?.status === "holding_context" ||
+        response?.status === "waiting_for_hands" ||
+        response?.status === "idle" ||
+        response?.status === "no_landmarks"
+      ) {
+        setCaptureStatus(response?.note ?? "Waiting for hands.");
+      } else if (recognitionActive) {
+        if (response?.buffer_ready) {
+          setCaptureStatus("Recognition is live on the hot rolling buffer.");
+        } else {
+          setCaptureStatus(
+            `Recognition warming from live buffer: ${response?.frames_collected ?? 0}/${response?.sequence_length ?? 30}.`,
+          );
+        }
       } else {
         setCaptureStatus(
-          `Recognition is running at ${CAPTURE_INTERVAL_MS}ms intervals.`,
+          response?.buffer_ready
+            ? "Camera ready. Buffer warm and ready for recognition."
+            : `Camera ready. Buffer warming in background: ${response?.frames_collected ?? 0}/${response?.sequence_length ?? 30}.`,
         );
       }
 
@@ -296,7 +432,7 @@ export default function WebcamPanel({
     setIsRequestInFlight(true);
 
     try {
-      await captureAndSendFrame({ source: "manual" });
+      await captureAndSendFrame({ source: "manual", recognitionActive: true });
     } catch (captureError) {
       return;
     } finally {
@@ -315,34 +451,10 @@ export default function WebcamPanel({
       return;
     }
 
-    if (intervalRef.current !== null) {
-      setCaptureStatus("Recognition is already running.");
-      return;
-    }
-
-    setCaptureStatus(
-      `Recognition started at ${CAPTURE_INTERVAL_MS}ms intervals.`,
-    );
-    setIsInferenceSessionRunning(true);
-
-    intervalRef.current = window.setInterval(async () => {
-      if (requestInFlightRef.current) {
-        setSkippedTicks((count) => count + 1);
-        return;
-      }
-
-      requestInFlightRef.current = true;
-      setIsRequestInFlight(true);
-
-      try {
-        await captureAndSendFrame({ source: "loop" });
-      } catch (captureError) {
-        return;
-      } finally {
-        requestInFlightRef.current = false;
-        setIsRequestInFlight(false);
-      }
-    }, CAPTURE_INTERVAL_MS);
+    startCaptureLoop();
+    setRecognitionRunning(true);
+    setCaptureStatus("Recognition started. Using the live rolling buffer.");
+    void runCaptureTick("recognition-start");
   }
 
   async function handleResetSession() {
@@ -352,16 +464,17 @@ export default function WebcamPanel({
 
     const response = await onResetRealInferenceSession();
     if (response?.status === "reset") {
-      setFramesSent(0);
-      setSuccessfulResponses(0);
-      setFailedResponses(0);
-      setSkippedTicks(0);
-      setCaptureStatus("Recognition state reset.");
+      resetLocalRuntimeStats();
+      setCaptureStatus(
+        isCameraActive
+          ? "Recognition state reset. Buffer warming in background."
+          : "Recognition state reset.",
+      );
     }
   }
 
   function captureFrameToBase64() {
-    if (!videoRef.current || !canvasRef.current || !isCameraActive) {
+    if (!videoRef.current || !canvasRef.current || !cameraActiveRef.current) {
       throw new Error("Camera is not ready yet.");
     }
 
@@ -372,8 +485,14 @@ export default function WebcamPanel({
       throw new Error("Capture failed because the video frame is not ready.");
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const targetWidth = Math.min(CAPTURE_WIDTH, video.videoWidth);
+    const targetHeight = Math.max(
+      1,
+      Math.round((targetWidth / video.videoWidth) * video.videoHeight),
+    );
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
 
     const context = canvas.getContext("2d");
     if (!context) {
@@ -381,7 +500,7 @@ export default function WebcamPanel({
     }
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.92);
+    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
   }
 
   function startOverlayLoop() {
@@ -515,11 +634,39 @@ export default function WebcamPanel({
 
   const recognitionLabel = isInferenceSessionRunning
     ? "Recognition live"
-    : "Recognition ready";
+    : inferenceResult?.buffer_ready
+      ? "Buffer ready"
+    : isCameraActive
+      ? "Camera warming"
+      : "Recognition ready";
   const recognitionStateText = isInferenceSessionRunning
     ? "Recognition is running."
-    : "Recognition is stopped.";
+    : inferenceResult?.buffer_ready && isCameraActive
+      ? "Recognition is paused while the hot buffer stays ready."
+    : isCameraActive
+      ? "Recognition is paused while the buffer stays warm."
+      : "Recognition is stopped.";
   const overlayToggleLabel = showKeypoints ? "Keypoints on" : "Keypoints off";
+  const bufferSummary =
+    typeof inferenceResult?.frames_collected === "number" &&
+    typeof inferenceResult?.sequence_length === "number"
+      ? inferenceResult.buffer_ready
+        ? "Buffer ready"
+        : `Buffer ${inferenceResult.frames_collected}/${inferenceResult.sequence_length}`
+      : "Buffer 0/30";
+  const {
+    startCameraDisabled,
+    stopCameraDisabled,
+    startRecognitionDisabled,
+    stopRecognitionDisabled,
+    resetDisabled,
+  } = getWebcamControlState({
+    isStartingCamera,
+    isStoppingCamera,
+    isCameraActive,
+    isRecognitionActive: isInferenceSessionRunning,
+    isResetting,
+  });
 
   return (
     <section className="panel panel--webcam">
@@ -551,7 +698,7 @@ export default function WebcamPanel({
               type="button"
               className="secondary-button secondary-button--ghost control-button control-button--compact"
               onClick={startCamera}
-              disabled={isStartingCamera || isCameraActive}
+              disabled={startCameraDisabled}
             >
               <span className="control-button__label">Start Camera</span>
               <span className="control-button__state metric-code">
@@ -562,8 +709,10 @@ export default function WebcamPanel({
             <button
               type="button"
               className="secondary-button secondary-button--ghost control-button control-button--compact"
-              onClick={stopCamera}
-              disabled={!isCameraActive}
+              onClick={() => {
+                void stopCamera();
+              }}
+              disabled={stopCameraDisabled}
             >
               <span className="control-button__label">Stop Camera</span>
               <span className="control-button__state metric-code">
@@ -592,12 +741,7 @@ export default function WebcamPanel({
               type="button"
               className="primary-button primary-button--accent control-button control-button--compact"
               onClick={handleStartInferenceSession}
-              disabled={
-                !isCameraActive ||
-                isInferenceSessionRunning ||
-                isRequestInFlight ||
-                isLoading
-              }
+              disabled={startRecognitionDisabled}
             >
               <span className="control-button__label">Start Recognition</span>
               <span className="control-button__state metric-code">
@@ -609,7 +753,7 @@ export default function WebcamPanel({
               type="button"
               className="secondary-button secondary-button--danger control-button control-button--compact"
               onClick={() => stopInferenceSession({ updateStatus: true })}
-              disabled={!isInferenceSessionRunning}
+              disabled={stopRecognitionDisabled}
             >
               <span className="control-button__label">Stop Recognition</span>
               <span className="control-button__state metric-code">halt</span>
@@ -619,7 +763,7 @@ export default function WebcamPanel({
               type="button"
               className="secondary-button secondary-button--danger control-button control-button--compact"
               onClick={handleResetSession}
-              disabled={isResetting || isInferenceSessionRunning}
+              disabled={resetDisabled}
             >
               <span className="control-button__label">Reset</span>
               <span className="control-button__state metric-code">
@@ -682,7 +826,7 @@ export default function WebcamPanel({
             <span className="release-summary__label">Mode</span>
             <strong className="metric-code">{recognitionLabel}</strong>
             <span className="release-summary__meta metric-code">
-              {CAPTURE_INTERVAL_MS}ms | about 10 FPS
+              {bufferSummary}
             </span>
           </div>
         </div>
@@ -698,9 +842,9 @@ export default function WebcamPanel({
           <dd>{showKeypoints ? overlayStatus : "Hidden"}</dd>
         </div>
         <div>
-          <dt>Live session state</dt>
+          <dt>Buffer state</dt>
           <dd className="metric-code">
-            {inferenceResult?.status ?? "idle"} |{" "}
+            {(inferenceResult?.buffer_ready ? "ready" : inferenceResult?.status) ?? "idle"} |{" "}
             {typeof inferenceResult?.frames_collected === "number" &&
             typeof inferenceResult?.sequence_length === "number"
               ? `${inferenceResult.frames_collected}/${inferenceResult.sequence_length}`
@@ -737,7 +881,6 @@ export default function WebcamPanel({
             onClick={handleManualRealInference}
             disabled={
               !isCameraActive ||
-              isLoading ||
               isRequestInFlight ||
               isInferenceSessionRunning
             }

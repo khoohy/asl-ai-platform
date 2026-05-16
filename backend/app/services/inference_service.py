@@ -60,6 +60,7 @@ def run_frame_debug(payload: InferenceRequest) -> FrameDebugResponse:
         note=result.note,
         hands_detected=result.hands_detected,
         keypoint_overlay=result.keypoint_overlay,
+        timing=result.timing,
     )
 
 
@@ -67,6 +68,7 @@ def run_real_inference(payload: RealInferenceRequest) -> RealInferenceResponse:
     result = _get_runtime_inference_engine().process_frame(
         image_base64=payload.image_base64,
         session_id=payload.session_id,
+        recognition_active=payload.recognition_active,
     )
     return RealInferenceResponse(**result)
 

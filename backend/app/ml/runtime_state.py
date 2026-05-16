@@ -10,6 +10,7 @@ import numpy as np
 
 from app.ml.runtime_config import (
     HAND_LOSS_GRACE_FRAMES,
+    HAND_LOSS_GRACE_MS,
     INPUT_DIM,
     PEAK_HISTORY_WINDOW,
     SEQUENCE_LENGTH,
@@ -39,10 +40,14 @@ class RuntimeSessionState:
     last_motion_score: float = 0.0
     missing_hands_count: int = 0
     hand_grace_remaining: int = HAND_LOSS_GRACE_FRAMES
+    hand_grace_remaining_ms: int = HAND_LOSS_GRACE_MS
+    last_valid_frame_ms: float | None = None
     is_idle: bool = True
     stable_output_hold_remaining: int = 0
     stable_output_cooldown_remaining: int = 0
     transition_cooldown_remaining: int = 0
+    camera_active: bool = False
+    recognition_active: bool = False
 
     def __post_init__(self) -> None:
         self.feature_buffer = deque(maxlen=self.sequence_length)
@@ -65,6 +70,10 @@ class RuntimeSessionState:
             )
         return np.stack(self.feature_buffer, axis=0).astype(np.float32)
 
+    @property
+    def buffer_warm(self) -> bool:
+        return self.valid_frames_collected >= self.sequence_length
+
     def clear_runtime_context(self) -> None:
         self.feature_buffer.clear()
         self.valid_frames_collected = 0
@@ -80,6 +89,7 @@ class RuntimeSessionState:
         self.stable_output_hold_remaining = 0
         self.stable_output_cooldown_remaining = 0
         self.transition_cooldown_remaining = 0
+        self.last_valid_frame_ms = None
 
     def reset(self) -> None:
         self.clear_runtime_context()
@@ -87,7 +97,11 @@ class RuntimeSessionState:
         self.last_status = "reset"
         self.missing_hands_count = 0
         self.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
+        self.hand_grace_remaining_ms = HAND_LOSS_GRACE_MS
         self.is_idle = True
+        self.camera_active = False
+        self.recognition_active = False
+        self.last_valid_frame_ms = None
 
     def advance_output_timers(self) -> None:
         if self.stable_output_hold_remaining > 0:

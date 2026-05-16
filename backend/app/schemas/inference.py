@@ -26,6 +26,14 @@ class RealInferenceRequest(BaseModel):
         default=None,
         description="Optional in-memory session identifier for the rolling 30-frame buffer.",
     )
+    recognition_active: bool = Field(
+        default=True,
+        description=(
+            "Whether this frame should drive active recognition output. "
+            "When false, the backend maintains the rolling buffer in the background "
+            "without running user-facing model inference."
+        ),
+    )
 
 
 class TopKPrediction(BaseModel):
@@ -40,6 +48,19 @@ class KeypointOverlay(BaseModel):
     face: list[list[float]] = Field(default_factory=list)
 
 
+class TimingBreakdown(BaseModel):
+    base64_decode_ms: float = 0.0
+    image_decode_ms: float = 0.0
+    image_resize_ms: float = 0.0
+    mediapipe_ms: float = 0.0
+    feature_ms: float = 0.0
+    total_preprocess_ms: float = 0.0
+    session_buffer_ms: float = 0.0
+    model_ms: float = 0.0
+    stabilization_ms: float = 0.0
+    total_backend_ms: float = 0.0
+
+
 class FrameDebugResponse(BaseModel):
     status: str
     feature_dim: int
@@ -47,6 +68,7 @@ class FrameDebugResponse(BaseModel):
     note: str
     hands_detected: bool = False
     keypoint_overlay: KeypointOverlay = Field(default_factory=KeypointOverlay)
+    timing: TimingBreakdown = Field(default_factory=TimingBreakdown)
 
 
 class RealInferenceResponse(BaseModel):
@@ -56,6 +78,7 @@ class RealInferenceResponse(BaseModel):
     hands_detected: bool = False
     missing_hands_count: int = 0
     grace_frames_remaining: int = 0
+    grace_ms_remaining: int = 0
     raw_prediction: str | None = None
     raw_confidence: float = 0.0
     stable_prediction: str | None = None
@@ -67,8 +90,12 @@ class RealInferenceResponse(BaseModel):
     status: str
     frames_collected: int
     sequence_length: int
+    camera_active: bool = False
+    recognition_active: bool = False
+    buffer_ready: bool = False
     note: str
     keypoint_overlay: KeypointOverlay = Field(default_factory=KeypointOverlay)
+    timing: TimingBreakdown = Field(default_factory=TimingBreakdown)
 
 
 class ResetSessionRequest(BaseModel):

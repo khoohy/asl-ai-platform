@@ -14,7 +14,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.ml.frame_processor import FrameProcessingResult
 from app.ml.inference_engine import RuntimeInferenceEngine
 from app.ml.runtime_config import (
-    HAND_LOSS_GRACE_FRAMES,
+    HAND_LOSS_GRACE_MS,
     HOLDING_CONTEXT_STATUS,
     INPUT_DIM,
     MIN_VOTE_COUNT,
@@ -83,6 +83,18 @@ class FakeFrameProcessor:
         return self._results.pop(0)
 
 
+class TestRuntimeInferenceEngine(RuntimeInferenceEngine):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.current_ms = 0.0
+
+    def advance_ms(self, delta_ms: float) -> None:
+        self.current_ms += delta_ms
+
+    def _now_ms(self) -> float:
+        return self.current_ms
+
+
 def make_ok_frame() -> FrameProcessingResult:
     feature_vector = np.ones((INPUT_DIM,), dtype=np.float32)
     return FrameProcessingResult(
@@ -99,6 +111,7 @@ def make_ok_frame() -> FrameProcessingResult:
             "pose": [],
             "face": [],
         },
+        timing={},
     )
 
 
@@ -117,6 +130,7 @@ def make_no_hands_frame() -> FrameProcessingResult:
             "pose": [[0.5, 0.3] for _ in range(7)],
             "face": [[0.5, 0.4] for _ in range(11)],
         },
+        timing={},
     )
 
 
@@ -253,6 +267,7 @@ def run_transition_hold_tests() -> None:
         stabilization=weak_transition,
         top_k=make_top_k("cool", 0.39, "good", 0.31),
         keypoint_overlay={"left_hand": [], "right_hand": [], "pose": [], "face": []},
+        timing=engine._create_timing(),
     )
     print(
         "weak-transition: "
@@ -281,6 +296,7 @@ def run_transition_hold_tests() -> None:
         stabilization=candidate_transition,
         top_k=make_top_k("mother", 0.84, "father", 0.10),
         keypoint_overlay={"left_hand": [], "right_hand": [], "pose": [], "face": []},
+        timing=engine._create_timing(),
     )
     print(
         "cooldown-transition: "
@@ -296,8 +312,8 @@ def run_transition_hold_tests() -> None:
 def run_no_hands_grace_test() -> None:
     print_header("no-hands grace and idle clearing")
     valid_frames = [make_ok_frame() for _ in range(35)]
-    missing_frames = [make_no_hands_frame() for _ in range(HAND_LOSS_GRACE_FRAMES + 1)]
-    engine = RuntimeInferenceEngine(
+    missing_frames = [make_no_hands_frame() for _ in range(12)]
+    engine = TestRuntimeInferenceEngine(
         model_loader=FakeModelLoader(
             model=FixedLogitModel(),
             label_map=FakeLabelMap(),
@@ -313,19 +329,20 @@ def run_no_hands_grace_test() -> None:
     first_missing = engine.process_frame("synthetic", session_id=session_id)
     print(
         "first-missing: "
-        f"status={first_missing['status']}, grace={first_missing['grace_frames_remaining']}, "
+        f"status={first_missing['status']}, grace_ms={first_missing['grace_ms_remaining']}, "
         f"prediction={first_missing['prediction']}"
     )
     if first_missing["status"] != HOLDING_CONTEXT_STATUS:
         raise RuntimeError("The first no-hands frame should enter holding_context.")
 
     final_missing = first_missing
-    for _ in range(HAND_LOSS_GRACE_FRAMES):
+    while final_missing["status"] != WAITING_FOR_HANDS_STATUS:
+        engine.advance_ms(250)
         final_missing = engine.process_frame("synthetic", session_id=session_id)
 
     print(
         "final-missing: "
-        f"status={final_missing['status']}, grace={final_missing['grace_frames_remaining']}, "
+        f"status={final_missing['status']}, grace_ms={final_missing['grace_ms_remaining']}, "
         f"prediction={final_missing['prediction']}"
     )
     if final_missing["status"] != WAITING_FOR_HANDS_STATUS:

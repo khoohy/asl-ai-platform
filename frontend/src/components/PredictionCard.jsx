@@ -17,6 +17,8 @@ const STABILIZATION_LABELS = {
   motion_required: "Motion required",
   no_landmarks: "No landmarks",
   warming_up: "Warming up",
+  buffering_background: "Buffer warming",
+  buffer_ready: "Ready",
   reset: "Session reset",
 };
 
@@ -26,26 +28,35 @@ export default function PredictionCard({ prediction, runtimeStats }) {
     prediction?.status === "idle";
   const isHoldingContext = prediction?.status === "holding_context";
   const isTransitioning = prediction?.status === "transitioning";
+  const isBackgroundBuffering = prediction?.status === "buffering_background";
+  const isBufferReady = prediction?.status === "buffer_ready";
   const isCollectingEvidence =
     prediction?.status === "collecting_evidence" ||
     prediction?.status === "collecting_votes";
   const topKPredictions =
-    isIdleLike || isHoldingContext
+    isIdleLike || isHoldingContext || isBackgroundBuffering || isBufferReady
       ? []
       : Array.isArray(prediction?.top_k)
         ? prediction.top_k
         : [];
   const stablePrediction = prediction?.stable_prediction;
   const fallbackPrediction = prediction?.prediction;
-  const stableOrFallback = isIdleLike
-    ? "Waiting for hands"
-    : isHoldingContext
-      ? "Holding context"
-      : isCollectingEvidence && !stablePrediction && !fallbackPrediction
-        ? "Waiting for next sign"
-        : stablePrediction || fallbackPrediction || "Starting recognition";
+  let stableOrFallback = "Starting recognition";
+  if (isIdleLike) {
+    stableOrFallback = "Waiting for hands";
+  } else if (isHoldingContext) {
+    stableOrFallback = "Holding context";
+  } else if (isBufferReady) {
+    stableOrFallback = "Ready";
+  } else if (isBackgroundBuffering) {
+    stableOrFallback = "Camera ready";
+  } else if (isCollectingEvidence && !stablePrediction && !fallbackPrediction) {
+    stableOrFallback = "Waiting for next sign";
+  } else if (stablePrediction || fallbackPrediction) {
+    stableOrFallback = stablePrediction || fallbackPrediction;
+  }
   const displayConfidence =
-    isIdleLike || isHoldingContext
+    isIdleLike || isHoldingContext || isBackgroundBuffering || isBufferReady
       ? null
       : stablePrediction
         ? prediction?.stable_confidence
@@ -100,12 +111,14 @@ export default function PredictionCard({ prediction, runtimeStats }) {
         <strong>
           {isIdleLike || isHoldingContext
             ? "Not accepted"
+            : isBackgroundBuffering || isBufferReady
+              ? "Recognition paused"
             : isCollectingEvidence && !prediction?.raw_prediction
               ? "Collecting evidence"
             : prediction?.raw_prediction ?? "Not available"}
         </strong>
         <span className="prediction-subline__meta metric-code">
-          {isIdleLike || isHoldingContext
+          {isIdleLike || isHoldingContext || isBackgroundBuffering || isBufferReady
             ? "N/A"
             : prediction?.raw_prediction && typeof prediction?.raw_confidence === "number"
             ? `${Math.round(prediction.raw_confidence * 100)}%`
@@ -136,10 +149,12 @@ export default function PredictionCard({ prediction, runtimeStats }) {
           <dd className="metric-code">{prediction?.model_source ?? "Not available"}</dd>
         </div>
         <div>
-          <dt>Accepted confidence</dt>
+        <dt>Accepted confidence</dt>
           <dd className="metric-code">
             {!isIdleLike &&
             !isHoldingContext &&
+            !isBackgroundBuffering &&
+            !isBufferReady &&
             prediction?.stable_prediction &&
             typeof prediction?.stable_confidence === "number"
               ? `${Math.round(prediction.stable_confidence * 100)}%`
@@ -150,7 +165,7 @@ export default function PredictionCard({ prediction, runtimeStats }) {
 
       <p className="inline-message prediction-note">
         {prediction?.note ??
-          "Start recognition to begin filling the 30-frame sequence buffer."}
+          "Start the camera to begin filling the rolling 30-frame sequence buffer."}
       </p>
 
       <details className="runtime-details">
@@ -200,10 +215,46 @@ export default function PredictionCard({ prediction, runtimeStats }) {
               {`sent ${runtimeStats?.framesSent ?? 0}, ok ${runtimeStats?.successfulResponses ?? 0}, skipped ${runtimeStats?.skippedTicks ?? 0}, failed ${runtimeStats?.failedResponses ?? 0}`}
             </dd>
           </div>
+          <div>
+            <dt>Frontend latency</dt>
+            <dd className="metric-code">
+              {`last ${formatMs(runtimeStats?.latestRequestLatencyMs)} | avg ${formatMs(runtimeStats?.averageRequestLatencyMs)} | fps ${formatRate(runtimeStats?.effectiveResponseFps)}`}
+            </dd>
+          </div>
+          <div>
+            <dt>Capture payload</dt>
+            <dd className="metric-code">
+              {`${runtimeStats?.captureWidth ?? 480}px JPEG | q=${runtimeStats?.jpegQuality ?? 0.6}`}
+            </dd>
+          </div>
+          <div>
+            <dt>Backend timing</dt>
+            <dd className="metric-code">
+              {`total ${formatMs(prediction?.timing?.total_backend_ms)} | mp ${formatMs(prediction?.timing?.mediapipe_ms)} | model ${formatMs(prediction?.timing?.model_ms)}`}
+            </dd>
+          </div>
+          <div className="meta-grid__span-full">
+            <dt>Backend breakdown</dt>
+            <dd className="metric-code">
+              {`b64 ${formatMs(prediction?.timing?.base64_decode_ms)} | image ${formatMs(prediction?.timing?.image_decode_ms)} | resize ${formatMs(prediction?.timing?.image_resize_ms)} | feature ${formatMs(prediction?.timing?.feature_ms)} | buffer ${formatMs(prediction?.timing?.session_buffer_ms)} | stabilize ${formatMs(prediction?.timing?.stabilization_ms)}`}
+            </dd>
+          </div>
         </dl>
       </details>
     </section>
   );
+}
+
+function formatMs(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${value.toFixed(1)}ms`
+    : "n/a";
+}
+
+function formatRate(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${value.toFixed(1)}/s`
+    : "n/a";
 }
 
 function getStatusTone(prediction) {
@@ -226,6 +277,9 @@ function getStatusTone(prediction) {
   if (status === "holding_context" || status === "waiting_for_hands" || status === "idle") {
     return "idle";
   }
+  if (status === "buffering_background" || status === "buffer_ready") {
+    return "warning";
+  }
 
   if (status === "transitioning" || status === "collecting_evidence") {
     return "warning";
@@ -240,6 +294,12 @@ function getStatusClass(prediction) {
 
   if (status === "warming_up") {
     return "status-pill--warming";
+  }
+  if (status === "buffering_background") {
+    return "status-pill--warming";
+  }
+  if (status === "buffer_ready") {
+    return "status-pill--stabilized";
   }
   if (status === "holding_context") {
     return "status-pill--collecting";

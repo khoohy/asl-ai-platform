@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+from time import perf_counter
 from typing import Any
 
 import torch
@@ -11,6 +13,7 @@ from app.ml.frame_processor import FrameProcessor
 from app.ml.model_loader import ASLModelLoader
 from app.ml.runtime_config import (
     HAND_LOSS_GRACE_FRAMES,
+    HAND_LOSS_GRACE_MS,
     HOLDING_CONTEXT_STATUS,
     IDLE_STATUS,
     INPUT_DIM,
@@ -37,6 +40,7 @@ class RuntimeInferenceEngine:
     session_manager: SessionManager | None = None
     stabilizer: ASLStabilizer | None = None
     top_k: int = TOP_K
+    hand_loss_grace_ms: int = HAND_LOSS_GRACE_MS
 
     def __post_init__(self) -> None:
         if self.session_manager is None:
@@ -49,7 +53,9 @@ class RuntimeInferenceEngine:
         self,
         image_base64: str,
         session_id: str | None = None,
+        recognition_active: bool = True,
     ) -> dict[str, Any]:
+        request_started_at = perf_counter()
         loader = self._get_model_loader()
         frame_processor = self._get_frame_processor()
 
@@ -62,16 +68,28 @@ class RuntimeInferenceEngine:
         session = self.session_manager.get_session(session_id)
         session.total_frames_received += 1
         session.advance_output_timers()
+        session.camera_active = True
+        session.recognition_active = recognition_active
+        now_ms = self._now_ms()
 
         frame_result = frame_processor.process_base64_image(image_base64)
+        timing = self._create_timing(frame_result.timing)
         if frame_result.status in {"no_hands", "no_landmarks"}:
-            return self._handle_missing_hands(session, frame_result)
+            return self._handle_missing_hands(
+                session,
+                frame_result,
+                timing=timing,
+                request_started_at=request_started_at,
+                now_ms=now_ms,
+            )
 
         if frame_result.status != "ok" or frame_result.feature_vector is None:
             session.is_idle = False
             session.missing_hands_count = 0
             session.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
+            session.hand_grace_remaining_ms = self.hand_loss_grace_ms
             session.last_status = frame_result.status
+            self._finalize_timing(timing, request_started_at)
             return self._base_response(
                 session=session,
                 status=frame_result.status,
@@ -82,15 +100,43 @@ class RuntimeInferenceEngine:
                 ),
                 hands_detected=True,
                 keypoint_overlay=frame_result.keypoint_overlay,
+                timing=timing,
             )
 
         session.is_idle = False
         session.missing_hands_count = 0
         session.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
+        session.hand_grace_remaining_ms = self.hand_loss_grace_ms
+        session.last_valid_frame_ms = now_ms
+        session_buffer_started_at = perf_counter()
         session.append(frame_result.feature_vector)
+        session.last_status = "buffer_ready" if session.buffer_warm else "buffering_background"
+
+        if not recognition_active:
+            timing["session_buffer_ms"] = self._elapsed_ms(session_buffer_started_at)
+            status = "buffer_ready" if session.buffer_warm else "buffering_background"
+            note = (
+                "Camera ready. Background buffer is warm and ready for recognition."
+                if session.buffer_warm
+                else (
+                    "Camera ready. Buffer warming in background: "
+                    f"{session.valid_frames_collected}/{session.sequence_length}"
+                )
+            )
+            self._finalize_timing(timing, request_started_at)
+            return self._base_response(
+                session=session,
+                status=status,
+                note=note,
+                hands_detected=True,
+                keypoint_overlay=frame_result.keypoint_overlay,
+                timing=timing,
+            )
 
         if session.valid_frames_collected < session.sequence_length:
+            timing["session_buffer_ms"] = self._elapsed_ms(session_buffer_started_at)
             session.last_status = "warming_up"
+            self._finalize_timing(timing, request_started_at)
             return self._base_response(
                 session=session,
                 status="warming_up",
@@ -100,9 +146,11 @@ class RuntimeInferenceEngine:
                 ),
                 hands_detected=True,
                 keypoint_overlay=frame_result.keypoint_overlay,
+                timing=timing,
             )
 
         sequence = session.stack_sequence()
+        timing["session_buffer_ms"] = self._elapsed_ms(session_buffer_started_at)
         motion_delta = self._compute_motion_delta(sequence)
         session.last_motion_score = motion_delta
         batch = (
@@ -112,6 +160,7 @@ class RuntimeInferenceEngine:
             .to(loader.device)
         )
 
+        model_started_at = perf_counter()
         with torch.no_grad():
             logits = loader.model(batch)
             probabilities = torch.softmax(logits, dim=1)[0]
@@ -119,6 +168,7 @@ class RuntimeInferenceEngine:
                 probabilities,
                 k=min(self.top_k, probabilities.shape[0]),
             )
+        timing["model_ms"] = self._elapsed_ms(model_started_at)
 
         top_k_predictions: list[dict[str, float | str]] = []
         for probability, index in zip(
@@ -133,18 +183,22 @@ class RuntimeInferenceEngine:
             )
 
         stabilizer = self._get_stabilizer()
+        stabilization_started_at = perf_counter()
         stabilization = stabilizer.stabilize(
             session=session,
             top_k_predictions=top_k_predictions,
             motion_delta=motion_delta,
         )
+        timing["stabilization_ms"] = self._elapsed_ms(stabilization_started_at)
 
         response = self._build_prediction_response(
             session=session,
             stabilization=stabilization,
             top_k=top_k_predictions,
             keypoint_overlay=frame_result.keypoint_overlay,
+            timing=timing,
         )
+        self._finalize_timing(timing, request_started_at)
         session.last_prediction = response
         session.last_status = str(response["status"])
         return response
@@ -162,25 +216,53 @@ class RuntimeInferenceEngine:
             "note": "Session buffer cleared",
         }
 
-    def _handle_missing_hands(self, session, frame_result) -> dict[str, Any]:
+    def _handle_missing_hands(
+        self,
+        session,
+        frame_result,
+        timing: dict[str, float],
+        request_started_at: float,
+        now_ms: float,
+    ) -> dict[str, Any]:
         session.missing_hands_count += 1
+        if session.last_valid_frame_ms is None:
+            elapsed_since_valid_ms = self.hand_loss_grace_ms + 1
+        else:
+            elapsed_since_valid_ms = max(0.0, now_ms - session.last_valid_frame_ms)
+        session.hand_grace_remaining_ms = max(
+            int(self.hand_loss_grace_ms - elapsed_since_valid_ms),
+            0,
+        )
         session.hand_grace_remaining = max(
-            HAND_LOSS_GRACE_FRAMES - session.missing_hands_count,
+            math.ceil(session.hand_grace_remaining_ms / 100.0),
             0,
         )
 
-        if session.valid_frames_collected > 0 and session.missing_hands_count <= HAND_LOSS_GRACE_FRAMES:
+        if (
+            session.valid_frames_collected > 0
+            and session.hand_grace_remaining_ms > 0
+        ):
             session.last_status = HOLDING_CONTEXT_STATUS
             session.is_idle = False
             held_prediction, held_confidence = self._get_held_display_prediction(session)
-            return self._base_response(
+            if not session.recognition_active:
+                held_prediction = None
+                held_confidence = 0.0
+            self._finalize_timing(timing, request_started_at)
+            response = self._base_response(
                 session=session,
                 status=HOLDING_CONTEXT_STATUS,
                 note=(
                     f"{frame_result.note} "
-                    "Holding context while hands are temporarily missing. "
-                    f"Grace remaining: {session.hand_grace_remaining}/{HAND_LOSS_GRACE_FRAMES}. "
+                    + (
+                        "Holding context while hands are temporarily missing. "
+                        if session.recognition_active
+                        else "Background buffer preserved briefly while hands are temporarily missing. "
+                    )
+                    + (
+                    f"Grace remaining: {session.hand_grace_remaining_ms / 1000.0:.1f}s. "
                     "No new frame was added."
+                    )
                 ),
                 prediction=held_prediction,
                 confidence=held_confidence,
@@ -189,19 +271,25 @@ class RuntimeInferenceEngine:
                 grace_frames_remaining=session.hand_grace_remaining,
                 raw_prediction=None,
                 raw_confidence=0.0,
-                stable_prediction=held_prediction,
-                stable_confidence=held_confidence,
+                stable_prediction=held_prediction if session.recognition_active else None,
+                stable_confidence=held_confidence if session.recognition_active else 0.0,
                 stabilization_status=(
-                    "holding_output" if held_prediction is not None else "holding_context"
+                    "holding_output"
+                    if session.recognition_active and held_prediction is not None
+                    else "holding_context"
                 ),
                 keypoint_overlay=frame_result.keypoint_overlay,
+                timing=timing,
             )
+            return response
 
         session.clear_runtime_context()
         session.is_idle = True
         session.last_status = WAITING_FOR_HANDS_STATUS if session.missing_hands_count > 0 else IDLE_STATUS
         session.hand_grace_remaining = 0
-        return self._base_response(
+        session.hand_grace_remaining_ms = 0
+        self._finalize_timing(timing, request_started_at)
+        response = self._base_response(
             session=session,
             status=session.last_status,
             note=(
@@ -212,7 +300,9 @@ class RuntimeInferenceEngine:
             missing_hands_count=session.missing_hands_count,
             grace_frames_remaining=0,
             keypoint_overlay=frame_result.keypoint_overlay,
+            timing=timing,
         )
+        return response
 
     def _build_prediction_response(
         self,
@@ -220,6 +310,7 @@ class RuntimeInferenceEngine:
         stabilization,
         top_k: list[dict[str, float | str]],
         keypoint_overlay: dict[str, list[list[float]]],
+        timing: dict[str, float],
     ) -> dict[str, Any]:
         new_stable_prediction = stabilization.stable_prediction
         new_stable_confidence = stabilization.stable_confidence
@@ -250,6 +341,7 @@ class RuntimeInferenceEngine:
                     vote_count=stabilization.vote_count,
                     vote_window_size=stabilization.vote_window_size,
                     keypoint_overlay=keypoint_overlay,
+                    timing=timing,
                 )
 
             session.last_stable_prediction = new_stable_prediction
@@ -273,6 +365,7 @@ class RuntimeInferenceEngine:
                 vote_count=stabilization.vote_count,
                 vote_window_size=stabilization.vote_window_size,
                 keypoint_overlay=keypoint_overlay,
+                timing=timing,
             )
 
         held_prediction, held_confidence = self._get_held_display_prediction(session)
@@ -296,6 +389,7 @@ class RuntimeInferenceEngine:
                 vote_count=stabilization.vote_count,
                 vote_window_size=stabilization.vote_window_size,
                 keypoint_overlay=keypoint_overlay,
+                timing=timing,
             )
 
         return self._base_response(
@@ -314,6 +408,7 @@ class RuntimeInferenceEngine:
             vote_count=stabilization.vote_count,
             vote_window_size=stabilization.vote_window_size,
             keypoint_overlay=keypoint_overlay,
+            timing=timing,
         )
 
     def _get_model_loader(self) -> ASLModelLoader:
@@ -386,6 +481,7 @@ class RuntimeInferenceEngine:
         vote_count: int = 0,
         vote_window_size: int = 10,
         keypoint_overlay: dict[str, list[list[float]]] | None = None,
+        timing: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         return {
             "prediction": prediction,
@@ -402,6 +498,7 @@ class RuntimeInferenceEngine:
                 if grace_frames_remaining is None
                 else grace_frames_remaining
             ),
+            "grace_ms_remaining": session.hand_grace_remaining_ms,
             "raw_prediction": raw_prediction,
             "raw_confidence": raw_confidence,
             "stable_prediction": stable_prediction,
@@ -413,7 +510,44 @@ class RuntimeInferenceEngine:
             "status": status,
             "frames_collected": session.valid_frames_collected,
             "sequence_length": session.sequence_length,
+            "camera_active": session.camera_active,
+            "recognition_active": session.recognition_active,
+            "buffer_ready": session.buffer_warm,
             "note": note,
             "keypoint_overlay": keypoint_overlay
             or {"left_hand": [], "right_hand": [], "pose": [], "face": []},
+            "timing": timing or self._create_timing(),
         }
+
+    @staticmethod
+    def _create_timing(frame_timing: dict[str, float] | None = None) -> dict[str, float]:
+        timing = {
+            "base64_decode_ms": 0.0,
+            "image_decode_ms": 0.0,
+            "image_resize_ms": 0.0,
+            "mediapipe_ms": 0.0,
+            "feature_ms": 0.0,
+            "total_preprocess_ms": 0.0,
+            "session_buffer_ms": 0.0,
+            "model_ms": 0.0,
+            "stabilization_ms": 0.0,
+            "total_backend_ms": 0.0,
+        }
+        if frame_timing:
+            timing.update(frame_timing)
+        return timing
+
+    @staticmethod
+    def _elapsed_ms(started_at: float) -> float:
+        return (perf_counter() - started_at) * 1000.0
+
+    @staticmethod
+    def _now_ms() -> float:
+        return perf_counter() * 1000.0
+
+    @staticmethod
+    def _finalize_timing(
+        timing: dict[str, float],
+        request_started_at: float,
+    ) -> None:
+        timing["total_backend_ms"] = (perf_counter() - request_started_at) * 1000.0

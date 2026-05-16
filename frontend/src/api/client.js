@@ -48,7 +48,11 @@ export async function runFrameDebug(imageBase64) {
   return parseJsonResponse(response);
 }
 
-export async function runRealInference(imageBase64, sessionId = "default") {
+export async function runRealInference(
+  imageBase64,
+  sessionId = "default",
+  recognitionActive = true,
+) {
   const response = await fetch(`${API_BASE_URL}/api/inference/frame`, {
     method: "POST",
     headers: {
@@ -57,6 +61,7 @@ export async function runRealInference(imageBase64, sessionId = "default") {
     body: JSON.stringify({
       image_base64: imageBase64,
       session_id: sessionId,
+      recognition_active: recognitionActive,
     }),
   });
 

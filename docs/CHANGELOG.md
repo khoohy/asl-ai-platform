@@ -685,3 +685,186 @@ The parity script verifies:
 - changing the checkpoint
 - changing the `180D` feature construction
 - changing the `30`-frame sequence length
+
+## MediaPipe runtime optimization
+
+### Purpose
+
+Reduce live backend latency by keeping hand detection current on every frame while reusing pose and face landmarks across short hand-present strides.
+
+### Files created or modified
+
+- modified:
+  - `backend/app/ml/runtime_config.py`
+  - `backend/app/ml/keypoint_extraction.py`
+  - `backend/app/ml/frame_processor.py`
+  - `backend/scripts/profile_latency.py`
+  - `backend/scripts/test_idle_state.py`
+  - `backend/scripts/test_runtime_tuning_parity.py`
+  - `docs/CHANGELOG.md`
+  - `docs/COMPONENT_ANATOMY.md`
+- created:
+  - `backend/scripts/test_pose_face_reuse.py`
+
+### Major design decisions
+
+- keep MediaPipe Hands running on every backend frame request
+- reuse Pose and FaceMesh outputs across a short stride instead of recomputing them every frame
+- count the reuse stride only across hand-present frames so idle or no-hands requests do not spend extra time on pose/face refreshes
+- keep hand presence tied to the current frame only
+- preserve the same final feature contract:
+  - hands `126`
+  - pose `21`
+  - face `33`
+
+### Verification and tests performed
+
+- `python backend\scripts\test_pose_face_reuse.py`
+- `python backend\scripts\test_idle_state.py`
+- `python backend\scripts\test_runtime_tuning_parity.py`
+- `python backend\scripts\profile_latency.py backend\artifacts\phase4b_test_frame.jpg`
+
+Measured backend profiler result on the bounded no-hands sample:
+
+- before optimization:
+  - average `total_backend_ms`: about `58.94`
+  - average `mediapipe_ms`: about `54.18`
+- after optimization:
+  - average `total_backend_ms`: about `27.81`
+  - average `mediapipe_ms`: about `23.00`
+
+### Known limitations
+
+- the measured profiler sample stayed in `waiting_for_hands`, so it does not represent the full active-sign path through feature construction, model forward, and stabilization
+- live browser metrics still depend on the user’s actual camera scene, hand visibility, and request cadence
+
+### Intentionally deferred
+
+- model retraining
+- checkpoint changes
+- changing the `180D` feature layout
+- changing the `30`-frame sequence length
+- WebSocket transport
+
+## Background buffer warming
+
+### Purpose
+
+Restore the old product feel where the camera can already be building temporal context before the user explicitly turns on recognition, so the `30`-frame model requirement is less visible in live use.
+
+### Files created or modified
+
+- created:
+  - `backend/scripts/test_background_buffering.py`
+- modified:
+  - `backend/app/ml/runtime_state.py`
+  - `backend/app/ml/session_manager.py`
+  - `backend/app/ml/inference_engine.py`
+  - `backend/app/schemas/inference.py`
+  - `backend/app/services/inference_service.py`
+  - `frontend/src/api/client.js`
+  - `frontend/src/App.jsx`
+  - `frontend/src/components/WebcamPanel.jsx`
+  - `frontend/src/components/PredictionCard.jsx`
+  - `frontend/README.md`
+  - `backend/README.md`
+  - `docs/CHANGELOG.md`
+  - `docs/COMPONENT_ANATOMY.md`
+
+### Major design decisions
+
+- make camera-on buffering and recognition-active display separate runtime concerns
+- allow background frames to fill the rolling buffer without running user-facing model inference
+- use time-based hand-loss grace so brief camera dropouts do not trigger an overly aggressive cold restart
+- preserve the old safety behavior:
+  - brief hand loss still becomes `holding_context`
+  - prolonged hand loss still becomes `waiting_for_hands`
+  - stale accepted predictions are still cleared on idle
+- keep the model contract unchanged:
+  - same checkpoint
+  - same `180D` per-frame feature vector
+  - same `30`-frame sequence requirement
+
+### Verification and tests performed
+
+- `python backend\scripts\test_background_buffering.py`
+- `python backend\scripts\test_idle_state.py`
+- `python backend\scripts\test_runtime_tuning_parity.py`
+- `python -m compileall backend\app backend\scripts`
+
+The new regression test verifies:
+
+- camera-on background buffering fills the rolling buffer before recognition starts
+- starting recognition from a partially warm buffer continues from current progress rather than restarting from `0/30`
+- starting recognition on a hot buffer does not force a fresh `30`-frame cold start
+- stopping recognition preserves the buffer while the camera remains on
+- stopping the camera or resetting clears the buffer and session state
+- no-hands behavior still transitions safely from `holding_context` to `waiting_for_hands`
+- no-hands frames do not warm the rolling buffer
+
+## Live recognition UX and latency refinement
+
+### Purpose
+
+Improve the real product feel of live recognition without touching the checkpoint, feature contract, sequence length, or stabilization thresholds.
+
+### Files created or modified
+
+- created:
+  - `frontend/src/components/webcamControlState.js`
+  - `frontend/scripts/test_control_states.mjs`
+- modified:
+  - `backend/app/ml/runtime_config.py`
+  - `backend/app/ml/runtime_state.py`
+  - `backend/app/ml/inference_engine.py`
+  - `backend/app/schemas/inference.py`
+  - `backend/scripts/test_background_buffering.py`
+  - `backend/scripts/test_idle_state.py`
+  - `backend/scripts/test_runtime_tuning_parity.py`
+  - `frontend/src/App.jsx`
+  - `frontend/src/components/WebcamPanel.jsx`
+  - `frontend/src/components/PredictionCard.jsx`
+  - `frontend/README.md`
+  - `backend/README.md`
+  - `docs/CHANGELOG.md`
+  - `docs/COMPONENT_ANATOMY.md`
+
+### Major design decisions
+
+- keep the rolling buffer hot whenever the camera stays on
+- make `Start Recognition` a stable mode toggle instead of a buffer-start trigger
+- move hand-loss grace to a wall-clock default of `2000ms`
+- reduce capture payload for lower latency:
+  - width `480px`
+  - JPEG quality `0.6`
+- derive recognition control states from stable camera and recognition mode only, not from noisy per-frame backend statuses
+
+### Verification and tests performed
+
+- `python backend\scripts\test_background_buffering.py`
+- `python backend\scripts\test_idle_state.py`
+- `python backend\scripts\test_runtime_tuning_parity.py`
+- `node frontend\scripts\test_control_states.mjs`
+- `npm run build`
+
+### Known limitations
+
+- live browser FPS still depends on real camera scene complexity and local machine performance
+- transport remains HTTP plus base64 rather than streaming
+
+### Intentionally deferred
+
+- WebSockets
+- checkpoint changes
+- sequence-length changes
+
+### Known limitations
+
+- the frontend still uses an HTTP timer loop rather than true streaming
+- “immediate” recognition still depends on how warm the background buffer already is and whether valid hand-present frames are arriving
+
+### Intentionally deferred
+
+- WebSocket transport
+- model changes
+- sequence-length changes

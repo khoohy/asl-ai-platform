@@ -14,7 +14,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.ml.frame_processor import FrameProcessingResult
 from app.ml.inference_engine import RuntimeInferenceEngine
 from app.ml.runtime_config import (
-    HAND_LOSS_GRACE_FRAMES,
+    HAND_LOSS_GRACE_MS,
     HOLDING_CONTEXT_STATUS,
     INPUT_DIM,
     WAITING_FOR_HANDS_STATUS,
@@ -62,6 +62,18 @@ class FakeFrameProcessor:
         return self._results.pop(0)
 
 
+class TestRuntimeInferenceEngine(RuntimeInferenceEngine):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.current_ms = 0.0
+
+    def advance_ms(self, delta_ms: float) -> None:
+        self.current_ms += delta_ms
+
+    def _now_ms(self) -> float:
+        return self.current_ms
+
+
 def make_ok_frame() -> FrameProcessingResult:
     feature_vector = np.ones((INPUT_DIM,), dtype=np.float32)
     return FrameProcessingResult(
@@ -78,6 +90,7 @@ def make_ok_frame() -> FrameProcessingResult:
             "pose": [],
             "face": [],
         },
+        timing={},
     )
 
 
@@ -96,13 +109,14 @@ def make_no_hands_frame() -> FrameProcessingResult:
             "pose": [[0.5, 0.3] for _ in range(7)],
             "face": [[0.5, 0.4] for _ in range(11)],
         },
+        timing={},
     )
 
 
 def main() -> None:
     valid_frames = [make_ok_frame() for _ in range(35)]
-    missing_frames = [make_no_hands_frame() for _ in range(HAND_LOSS_GRACE_FRAMES + 1)]
-    engine = RuntimeInferenceEngine(
+    missing_frames = [make_no_hands_frame() for _ in range(12)]
+    engine = TestRuntimeInferenceEngine(
         model_loader=FakeModelLoader(
             model=FixedLogitModel(),
             label_map=FakeLabelMap(),
@@ -137,17 +151,22 @@ def main() -> None:
 
     holding_response = None
     final_idle_response = None
-    for index in range(1, HAND_LOSS_GRACE_FRAMES + 2):
+    missing_frame_index = 0
+    while True:
+        missing_frame_index += 1
+        engine.advance_ms(250)
         response = engine.process_frame("synthetic", session_id=session_id)
         print(
-            f"missing frame {index:02d}: status={response['status']}, "
+            f"missing frame {missing_frame_index:02d}: status={response['status']}, "
             f"missing_hands={response['missing_hands_count']}, "
-            f"grace_remaining={response['grace_frames_remaining']}, "
+            f"grace_remaining_ms={response['grace_ms_remaining']}, "
             f"prediction={response['prediction']}"
         )
-        if index == 1:
+        if missing_frame_index == 1:
             holding_response = response
         final_idle_response = response
+        if response["status"] == WAITING_FOR_HANDS_STATUS:
+            break
 
     if holding_response is None or holding_response["status"] != HOLDING_CONTEXT_STATUS:
         raise RuntimeError("Expected holding_context on the first no-hands frame.")

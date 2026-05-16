@@ -99,8 +99,23 @@ The live capture loop is now fixed to the fastest validated setting:
 
 - `100ms` per frame
 - about `10 FPS`
+- capture payload tuned for lower latency:
+  - width `480px`
+  - `image/jpeg`
+  - quality `0.6`
 
 Only one request is allowed in flight at a time. If a frame request is still running, the next timer tick is skipped instead of queueing overlapping requests.
+
+## Background buffer warming
+
+- `Start Camera` now begins background frame submission immediately.
+- The backend starts filling and maintaining the rolling `30`-frame buffer as soon as the camera is on.
+- `Start Recognition` no longer begins from zero if the background buffer is already warm.
+- If enough valid frames are already buffered, recognition can begin using the hot buffer immediately.
+- `Stop Recognition` pauses user-facing recognition while the camera keeps the background buffer warm.
+- `Stop Camera` stops the loop, releases the webcam, and clears the backend session.
+- `Reset` clears the current session state and starts buffer warming from zero again if the camera remains on.
+- brief hand loss now uses a time-based grace window of about `2.0s` before the backend clears the stale session
 
 ## Keypoint overlay
 
@@ -125,7 +140,7 @@ Only one request is allowed in flight at a time. If a frame request is still run
 - open the webcam
 - show a live preview with keypoints
 - send frames continuously to the real recognition endpoint
-- warm up the 30-frame rolling session buffer
+- warm up the 30-frame rolling session buffer as soon as the camera starts
 - display stabilized recognition as the main output
 - keep raw Top-K as secondary information under `Advanced details`
 - avoid spamming accepted words during sign transitions

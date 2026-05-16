@@ -18,6 +18,7 @@ The current system is a browser-to-backend ASL inference prototype with these la
   - keeps lightweight endpoints fast by avoiding model loading on module import
 - MediaPipe preprocessing
   - extracts hands, selected pose landmarks, and selected face landmarks from an image
+  - keeps hands current on every frame while reusing pose and face across short hand-present strides to reduce backend latency
 - 180D feature construction
   - produces the production-aligned per-frame vector:
     - 126 hand features
@@ -25,6 +26,7 @@ The current system is a browser-to-backend ASL inference prototype with these la
     - 33 face features
 - 30-frame rolling buffer
   - stores a session-local sliding window of valid 180D frame features
+  - starts warming as soon as the camera is on, even before recognition is enabled
 - PyTorch model inference
   - runs the real BiLSTM-based production model on a `1 x 30 x 180` tensor
 - Raw Top-K prediction output
@@ -38,6 +40,7 @@ The current system is a browser-to-backend ASL inference prototype with these la
   - preserves context briefly when hands disappear
   - clears runtime state after prolonged hand loss
   - returns back to waiting instead of predicting from stale buffers
+  - now uses a time-based grace window of about `2.0s`
 - Runtime-tuning parity
   - ports the old live deployment heuristics that helped raise operational success from about `82.7%` to `91.67%`
   - keeps that tuning in backend decision logic instead of changing the model checkpoint
@@ -116,6 +119,7 @@ Important state and props:
   - capture status
   - whether the camera is active
   - whether the continuous inference session is running
+  - whether the camera-driven hot buffer is ready
   - whether a request is in flight
   - runtime counters:
     - frames sent
@@ -151,8 +155,14 @@ How it interacts with inference flow:
 - captures the current video frame into a hidden canvas
 - converts that frame to base64
 - sends the frame into the app-level real inference callback
-- on continuous mode, repeats that process at a fixed interval while skipping ticks if the previous request has not finished
+- starts a single camera-owned capture loop as soon as the camera turns on
+- keeps feeding frames into the backend in background-buffer mode even while recognition is paused
+- switches to active recognition mode without restarting the buffer when the user clicks `Start Recognition`
+- repeats that process at a fixed interval while skipping ticks if the previous request has not finished
 - keeps the overlay loop independent from backend inference so keypoints do not lag behind the live video due to round-trip latency
+- uses a lighter capture payload for backend inference:
+  - `480px`
+  - JPEG quality `0.6`
 
 ### `frontend/src/components/PredictionCard.jsx`
 
@@ -431,6 +441,8 @@ Why it exists in the platform repo:
 Responsibility:
 
 - run MediaPipe hands, pose, and face mesh on a BGR image frame
+- keep hand detection current on every frame
+- reuse pose and face landmarks across short strides when safe
 
 Input and output:
 
@@ -442,14 +454,17 @@ Input and output:
     - right hand
     - pose
     - face
+    - lightweight metadata describing whether pose or face came from the current frame or from short-term reuse
 
 Dependency on old ASL system:
 
 - derived from the legacy runtime landmark extraction path
+- specifically reflects the old live optimization idea that hands should be processed every frame while pose and face can be reused across short strides
 
 Why it exists in the platform repo:
 
 - the backend needs to transform raw image frames into model-ready landmarks
+- it is also where the backend’s main live latency optimization now lives
 
 ### `backend/app/ml/preprocessing.py`
 
@@ -480,6 +495,7 @@ Responsibility:
 - decode it
 - build a 180D feature vector
 - return structured status codes
+- collect lightweight per-stage timing so latency can be profiled without changing model behavior
 
 Input and output:
 
@@ -516,6 +532,10 @@ Input and output:
 - output:
   - stacked `30 x 180` sequence when ready
   - prediction histories used for stabilization
+  - session flags for:
+    - `camera_active`
+    - `recognition_active`
+    - `buffer_warm`
 
 Dependency on old ASL system:
 
@@ -526,6 +546,7 @@ Why it exists in the platform repo:
 
 - session-local buffering and prediction history are application concerns, not training concerns
 - it also stores the hold, cooldown, and missing-hand state needed to preserve the old runtime's live usability behavior
+- it now also stores timing-related hand-loss grace state so brief dropouts can recover smoothly without a cold restart
 
 ### `backend/app/ml/session_manager.py`
 
@@ -558,7 +579,8 @@ Responsibility:
 - lazily load the model
 - lazily instantiate frame preprocessing
 - append valid features into the session buffer
-- run the model when the buffer reaches 30 valid frames
+- optionally maintain the rolling buffer in background mode without running recognition
+- run the model when the buffer reaches 30 valid frames and recognition is active
 - pass raw predictions through the stabilization layer
 - suspend or clear runtime context when hands are absent
 
@@ -567,7 +589,9 @@ Input and output:
 - input:
   - base64 frame
   - optional session id
+  - recognition mode flag
 - output:
+  - background-buffer status when the camera is warming the rolling sequence
   - warming-up responses
   - no-landmark or no-hand responses
   - holding-context responses during short hand loss
@@ -619,30 +643,34 @@ The current real inference lifecycle is:
 
 1. User starts the camera in the frontend.
 2. A browser-side MediaPipe Tasks hand detector reads the live `<video>` frames and draws hand keypoints directly on the overlay canvas for low-latency feedback.
-3. The frontend captures a frame from the `<video>` element for backend inference.
-4. The frame is drawn to a hidden `<canvas>`.
-5. The canvas is encoded as a base64 JPEG string.
-6. The frontend sends `POST /api/inference/frame`.
-7. The backend receives `image_base64` and an optional `session_id`.
-8. The frame processor strips any data URL prefix.
-9. The backend base64-decodes the image bytes.
-10. OpenCV decodes the bytes into an image frame.
-11. Backend MediaPipe extracts hand, pose, and face landmarks.
-12. The preprocessing layer constructs the production-aligned 180D feature vector.
-13. The session manager retrieves or creates the runtime session state.
-14. If no hands are visible, the backend increments the missing-hands counter.
-15. During the grace window, the backend returns `holding_context` and keeps the current buffer without appending invalid frames.
-16. After the grace window expires, the backend clears the rolling buffer and stabilization history and returns `waiting_for_hands`.
-17. If hands are visible, the runtime session appends the valid 180D vector to the rolling buffer.
-18. If the buffer holds fewer than 30 valid frames, the backend returns `warming_up`.
-19. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
-20. The PyTorch model runs a forward pass under `torch.no_grad()`.
-21. Softmax probabilities are computed.
-22. The Top-K class indices are mapped to labels with the label map.
-23. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
-24. The backend can briefly hold the last accepted stable sign during weak transition frames so random in-between guesses do not immediately replace it.
-25. The backend returns raw and stabilized prediction data to the frontend.
-26. The frontend updates status, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
+3. The frontend immediately starts a camera-owned capture loop, even before recognition is enabled.
+4. The frontend captures a frame from the `<video>` element for backend inference.
+5. The frame is drawn to a hidden `<canvas>`.
+6. The canvas is encoded as a base64 JPEG string.
+7. The frontend sends `POST /api/inference/frame`.
+8. The backend receives `image_base64`, `session_id`, and `recognition_active`.
+9. The frame processor strips any data URL prefix.
+10. The backend base64-decodes the image bytes.
+11. OpenCV decodes the bytes into an image frame.
+12. Backend MediaPipe extracts hand, pose, and face landmarks.
+13. Hands are processed on every frame, while pose and face may be reused from a recent hand-present frame according to the runtime stride settings.
+14. The preprocessing layer constructs the production-aligned 180D feature vector.
+15. The session manager retrieves or creates the runtime session state.
+16. If no hands are visible, the backend increments the missing-hands counter.
+17. During the time-based grace window, the backend returns `holding_context` and keeps the current buffer without appending invalid frames.
+18. After the grace window expires, the backend clears the rolling buffer and stabilization history and returns `waiting_for_hands`.
+19. If hands are visible, the runtime session appends the valid 180D vector to the rolling buffer.
+20. If `recognition_active` is `false`, the backend returns `buffering_background` or `buffer_ready` and does not run user-facing model inference.
+21. When the user clicks `Start Recognition`, the frontend keeps the same rolling session but flips `recognition_active` to `true`.
+22. If the buffer still holds fewer than 30 valid frames, the backend returns `warming_up` using current background progress rather than restarting from zero.
+23. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
+24. The PyTorch model runs a forward pass under `torch.no_grad()`.
+25. Softmax probabilities are computed.
+26. The Top-K class indices are mapped to labels with the label map.
+27. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
+28. The backend can briefly hold the last accepted stable sign during weak transition frames so random in-between guesses do not immediately replace it.
+29. The backend returns raw and stabilized prediction data plus backend timing fields to the frontend.
+30. The frontend updates status, buffer readiness, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
 
 ## F. Current limitations
 

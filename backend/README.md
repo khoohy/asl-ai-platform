@@ -136,3 +136,26 @@ python backend\scripts\test_runtime_tuning_parity.py
 ```
 
 - This parity work does not retrain the model or change the checkpoint. The practical improvement comes from runtime decision logic and live usability controls layered around the same production model path.
+
+## Background buffer warming
+
+- The runtime session now separates:
+  - camera-driven background buffering
+  - user-facing recognition mode
+- `POST /api/inference/frame` accepts `recognition_active`:
+  - `true`: maintain the buffer and run full recognition
+  - `false`: maintain the buffer only, without running user-facing model inference
+- This allows the frontend to:
+  - start warming the rolling `30`-frame buffer as soon as the camera is on
+  - start recognition on top of an already-hot buffer
+  - stop recognition without destroying the warm buffer if the camera remains on
+  - clear the session when the camera stops or when the user resets
+- hand-loss grace is now time-based as well as safety-oriented:
+  - `HAND_LOSS_GRACE_MS = 2000`
+  - brief hand loss stays in `holding_context`
+  - longer absence still clears to `waiting_for_hands`
+- Focused regression test:
+
+```powershell
+python backend\scripts\test_background_buffering.py
+```

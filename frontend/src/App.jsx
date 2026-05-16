@@ -19,9 +19,14 @@ export default function App() {
     failedResponses: 0,
     skippedTicks: 0,
     captureIntervalMs: 100,
+    captureWidth: 480,
+    jpegQuality: 0.6,
     isRequestInFlight: false,
     isCameraActive: false,
     isInferenceSessionRunning: false,
+    latestRequestLatencyMs: 0,
+    averageRequestLatencyMs: 0,
+    effectiveResponseFps: 0,
   });
   const [healthError, setHealthError] = useState("");
   const [realInferenceError, setRealInferenceError] = useState("");
@@ -48,14 +53,22 @@ export default function App() {
     }
   }
 
-  async function handleCaptureAndRunRealInference(imageBase64) {
-    setIsRealInferenceLoading(true);
+  async function handleCaptureAndRunRealInference(
+    imageBase64,
+    options = {},
+  ) {
+    const { recognitionActive = true, source = "loop" } = options;
+    const shouldShowLoading = source === "manual";
+    if (shouldShowLoading) {
+      setIsRealInferenceLoading(true);
+    }
     setRealInferenceError("");
 
     try {
       const response = await runRealInference(
         imageBase64,
         REAL_INFERENCE_SESSION_ID,
+        recognitionActive,
       );
       setPrediction(response);
       return response;
@@ -68,7 +81,9 @@ export default function App() {
       );
       throw error;
     } finally {
-      setIsRealInferenceLoading(false);
+      if (shouldShowLoading) {
+        setIsRealInferenceLoading(false);
+      }
     }
   }
 
@@ -82,6 +97,9 @@ export default function App() {
         prediction: null,
         confidence: 0,
         top_k: [],
+        hands_detected: false,
+        missing_hands_count: 0,
+        grace_frames_remaining: 0,
         raw_prediction: null,
         raw_confidence: 0,
         stable_prediction: null,
@@ -93,7 +111,28 @@ export default function App() {
         status: response.status,
         frames_collected: 0,
         sequence_length: 30,
+        camera_active: false,
+        recognition_active: false,
+        buffer_ready: false,
         note: response.note,
+        keypoint_overlay: {
+          left_hand: [],
+          right_hand: [],
+          pose: [],
+          face: [],
+        },
+        timing: {
+          base64_decode_ms: 0,
+          image_decode_ms: 0,
+          image_resize_ms: 0,
+          mediapipe_ms: 0,
+          feature_ms: 0,
+          total_preprocess_ms: 0,
+          session_buffer_ms: 0,
+          model_ms: 0,
+          stabilization_ms: 0,
+          total_backend_ms: 0,
+        },
       });
       return response;
     } catch (error) {
@@ -154,7 +193,6 @@ export default function App() {
         <section className="live-dashboard">
           <div className="live-dashboard__main">
             <WebcamPanel
-              isLoading={isRealInferenceLoading}
               isResetting={isSessionResetting}
               error={realInferenceError}
               inferenceResult={prediction}

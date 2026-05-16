@@ -27,9 +27,11 @@ class FrameProcessor:
     """Convert one image frame into the exact 180D runtime feature representation."""
 
     def __init__(self, confidence_threshold: float = 0.5) -> None:
-        self.extractor = KeypointExtractor(confidence_threshold=confidence_threshold)
+        self.confidence_threshold = confidence_threshold
+        self.extractor: KeypointExtractor | None = None
 
     def process_base64_image(self, image_base64: str) -> FrameProcessingResult:
+        extractor = self._get_extractor()
         payload = self._strip_data_url_prefix(image_base64).strip()
         if not payload:
             return self._result("invalid_base64", None, "The image_base64 field is empty.")
@@ -52,7 +54,7 @@ class FrameProcessor:
                 "OpenCV could not decode the provided image bytes.",
             )
 
-        keypoints = self.extractor.extract_keypoints(frame_bgr)
+        keypoints = extractor.extract_keypoints(frame_bgr)
         if not self._has_any_landmarks(keypoints):
             return self._result(
                 "no_landmarks",
@@ -102,6 +104,13 @@ class FrameProcessor:
         return np.concatenate([hand_features, pose_features, face_features]).astype(
             np.float32
         )
+
+    def _get_extractor(self) -> KeypointExtractor:
+        if self.extractor is None:
+            self.extractor = KeypointExtractor(
+                confidence_threshold=self.confidence_threshold,
+            )
+        return self.extractor
 
     @staticmethod
     def _strip_data_url_prefix(image_base64: str) -> str:

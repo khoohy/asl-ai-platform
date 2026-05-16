@@ -34,4 +34,33 @@ export async function runMockInference(imageBase64 = "abcdefghijklmnop") {
   return parseJsonResponse(response);
 }
 
+export async function runRealInference(imageBase64, sessionId = "default") {
+  const response = await fetch(`${API_BASE_URL}/api/inference/frame`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      session_id: sessionId,
+    }),
+  });
+
+  return parseJsonResponse(response);
+}
+
+export async function resetRealInferenceSession(sessionId = "default") {
+  const response = await fetch(`${API_BASE_URL}/api/inference/reset-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+    }),
+  });
+
+  return parseJsonResponse(response);
+}
+
 export { API_BASE_URL };

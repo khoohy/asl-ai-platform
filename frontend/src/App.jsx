@@ -1,20 +1,29 @@
 import { useEffect, useState } from "react";
 
-import { API_BASE_URL, fetchHealth, runMockInference } from "./api/client";
+import {
+  API_BASE_URL,
+  fetchHealth,
+  resetRealInferenceSession,
+  runMockInference,
+  runRealInference,
+} from "./api/client";
 import HealthStatus from "./components/HealthStatus";
 import MockInferencePanel from "./components/MockInferencePanel";
 import PredictionCard from "./components/PredictionCard";
 import WebcamPanel from "./components/WebcamPanel";
+
+const REAL_INFERENCE_SESSION_ID = "default";
 
 export default function App() {
   const [health, setHealth] = useState(null);
   const [prediction, setPrediction] = useState(null);
   const [healthError, setHealthError] = useState("");
   const [manualInferenceError, setManualInferenceError] = useState("");
-  const [webcamInferenceError, setWebcamInferenceError] = useState("");
+  const [realInferenceError, setRealInferenceError] = useState("");
   const [isHealthLoading, setIsHealthLoading] = useState(true);
   const [isManualInferenceLoading, setIsManualInferenceLoading] = useState(false);
-  const [isWebcamInferenceLoading, setIsWebcamInferenceLoading] = useState(false);
+  const [isRealInferenceLoading, setIsRealInferenceLoading] = useState(false);
+  const [isSessionResetting, setIsSessionResetting] = useState(false);
 
   async function loadHealth() {
     setIsHealthLoading(true);
@@ -41,7 +50,13 @@ export default function App() {
 
     try {
       const response = await runMockInference();
-      setPrediction(response);
+      setPrediction({
+        ...response,
+        status: "mock",
+        frames_collected: 0,
+        sequence_length: 30,
+        top_k: [],
+      });
     } catch (error) {
       setPrediction(null);
       setManualInferenceError(
@@ -54,23 +69,53 @@ export default function App() {
     }
   }
 
-  async function handleCaptureAndRunInference(imageBase64) {
-    setIsWebcamInferenceLoading(true);
-    setWebcamInferenceError("");
+  async function handleCaptureAndRunRealInference(imageBase64) {
+    setIsRealInferenceLoading(true);
+    setRealInferenceError("");
 
     try {
-      const response = await runMockInference(imageBase64);
+      const response = await runRealInference(
+        imageBase64,
+        REAL_INFERENCE_SESSION_ID,
+      );
       setPrediction(response);
     } catch (error) {
       setPrediction(null);
-      setWebcamInferenceError(
+      setRealInferenceError(
         error instanceof Error
           ? error.message
-          : "Unable to run webcam mock inference.",
+          : "Unable to run raw real inference.",
       );
       throw error;
     } finally {
-      setIsWebcamInferenceLoading(false);
+      setIsRealInferenceLoading(false);
+    }
+  }
+
+  async function handleResetRealInferenceSession() {
+    setIsSessionResetting(true);
+    setRealInferenceError("");
+
+    try {
+      const response = await resetRealInferenceSession(REAL_INFERENCE_SESSION_ID);
+      setPrediction({
+        prediction: null,
+        confidence: 0,
+        top_k: [],
+        model_source: "asl_wlasl300_realtime",
+        status: response.status,
+        frames_collected: 0,
+        sequence_length: 30,
+        note: response.note,
+      });
+    } catch (error) {
+      setRealInferenceError(
+        error instanceof Error
+          ? error.message
+          : "Unable to reset the real inference session.",
+      );
+    } finally {
+      setIsSessionResetting(false);
     }
   }
 
@@ -85,12 +130,13 @@ export default function App() {
 
       <main className="dashboard">
         <section className="hero">
-          <p className="eyebrow">Phase 3 webcam scaffold</p>
+          <p className="eyebrow">Phase 4C raw sequence inference</p>
           <h1>ASL AI Platform</h1>
           <p className="hero-copy">
             A browser-first dashboard for validating backend availability,
-            capturing a webcam frame, and testing the mock ASL inference flow
-            before real model integration arrives later.
+            capturing webcam frames, filling a 30-frame rolling buffer, and
+            testing raw ASL model inference before stabilization arrives in the
+            next phase.
           </p>
 
           <div className="hero-meta">
@@ -100,7 +146,11 @@ export default function App() {
             </div>
             <div>
               <span className="hero-label">Current mode</span>
-              <strong>Webcam capture with mock inference</strong>
+              <strong>Raw 30-frame model inference</strong>
+            </div>
+            <div>
+              <span className="hero-label">Session ID</span>
+              <strong>{REAL_INFERENCE_SESSION_ID}</strong>
             </div>
           </div>
         </section>
@@ -114,9 +164,12 @@ export default function App() {
           />
 
           <WebcamPanel
-            isLoading={isWebcamInferenceLoading}
-            error={webcamInferenceError}
-            onCaptureAndInfer={handleCaptureAndRunInference}
+            isLoading={isRealInferenceLoading}
+            isResetting={isSessionResetting}
+            error={realInferenceError}
+            inferenceResult={prediction}
+            onCaptureAndRunRealInference={handleCaptureAndRunRealInference}
+            onResetRealInferenceSession={handleResetRealInferenceSession}
           />
 
           <MockInferencePanel

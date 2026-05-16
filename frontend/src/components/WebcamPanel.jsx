@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function WebcamPanel({ isLoading, error, onCaptureAndInfer }) {
+export default function WebcamPanel({
+  isLoading,
+  isResetting,
+  error,
+  inferenceResult,
+  onCaptureAndRunRealInference,
+  onResetRealInferenceSession,
+}) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -103,8 +110,8 @@ export default function WebcamPanel({ isLoading, error, onCaptureAndInfer }) {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageBase64 = canvas.toDataURL("image/jpeg", 0.92);
 
-      setCaptureStatus("Frame captured.");
-      await onCaptureAndInfer(imageBase64);
+      setCaptureStatus("Frame captured and submitted for real inference.");
+      await onCaptureAndRunRealInference(imageBase64);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Capture failed.";
@@ -122,14 +129,14 @@ export default function WebcamPanel({ isLoading, error, onCaptureAndInfer }) {
     <section className="panel panel--webcam">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Webcam mock flow</p>
+          <p className="eyebrow">Webcam real flow</p>
           <h2>Camera capture</h2>
         </div>
       </div>
 
       <p className="panel-copy">
         Open the browser camera, capture a single frame, convert it to base64,
-        and send it to the existing mock inference endpoint.
+        and send it to the raw 30-frame model buffer endpoint.
       </p>
 
       <div className={`webcam-stage ${isCameraActive ? "webcam-stage--live" : ""}`}>
@@ -175,8 +182,17 @@ export default function WebcamPanel({ isLoading, error, onCaptureAndInfer }) {
         disabled={!isCameraActive || isLoading}
       >
         {isLoading
-          ? "Capturing and running mock inference..."
-          : "Capture frame and run mock inference"}
+          ? "Capturing and running real inference..."
+          : "Capture frame and run real inference"}
+      </button>
+
+      <button
+        type="button"
+        className="secondary-button secondary-button--inline"
+        onClick={onResetRealInferenceSession}
+        disabled={isResetting}
+      >
+        {isResetting ? "Resetting session..." : "Reset real inference session"}
       </button>
 
       <dl className="meta-grid meta-grid--single">
@@ -197,7 +213,10 @@ export default function WebcamPanel({ isLoading, error, onCaptureAndInfer }) {
       >
         {cameraError ||
           error ||
-          "Allow browser camera permission to test the webcam-to-mock-backend flow."}
+          (inferenceResult?.status && inferenceResult.status !== "mock"
+            ? inferenceResult.note
+            : "") ||
+          "Allow browser camera permission and capture multiple frames to fill the 30-frame buffer."}
       </p>
 
       <canvas ref={canvasRef} className="hidden-canvas" aria-hidden="true" />

@@ -30,3 +30,23 @@ python backend\scripts\test_frame_preprocessing.py path\to\test_image.jpg
   - test inputs are resized to width `640` before MediaPipe processing
 - This phase validates single-frame decoding and feature construction only.
 - Rolling 30-frame buffering and real model prediction remain deferred to Phase 4C.
+
+## Phase 4C: Raw 30-frame inference
+
+- Added a per-session in-memory rolling buffer with sequence length `30`
+- Added raw real inference endpoint: `POST /api/inference/frame`
+- Added session reset endpoint: `POST /api/inference/reset-session`
+- The backend now:
+  - accepts one base64 image frame per request
+  - converts it into a `180D` feature vector
+  - appends valid frames to the session buffer
+  - returns `warming_up` until `30/30`
+  - returns raw Top-K model predictions once the buffer is full
+- Smoke test command:
+
+```powershell
+python backend\scripts\test_sequence_inference.py backend\artifacts\phase4b_test_frame.jpg
+```
+
+- Predictions in this phase are raw and intentionally not stabilized yet.
+- Phase 4D will add stabilization, voting, and confusion-handling logic.

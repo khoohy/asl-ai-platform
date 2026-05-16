@@ -21,3 +21,44 @@ class FrameDebugResponse(BaseModel):
     feature_dim: int
     expected_dim: int
     note: str
+
+
+class RealInferenceRequest(BaseModel):
+    image_base64: str = Field(
+        ...,
+        min_length=16,
+        description="Base64-encoded image string, with or without a data URI prefix.",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional in-memory session identifier for the rolling 30-frame buffer.",
+    )
+
+
+class TopKPrediction(BaseModel):
+    label: str
+    confidence: float
+
+
+class RealInferenceResponse(BaseModel):
+    prediction: str | None
+    confidence: float
+    top_k: list[TopKPrediction]
+    model_source: str
+    status: str
+    frames_collected: int
+    sequence_length: int
+    note: str
+
+
+class ResetSessionRequest(BaseModel):
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session identifier. Defaults to the shared local session.",
+    )
+
+
+class ResetSessionResponse(BaseModel):
+    status: str
+    session_id: str
+    note: str

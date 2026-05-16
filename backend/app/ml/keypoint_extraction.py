@@ -20,20 +20,20 @@ class KeypointExtractor:
         self.mp_pose = mp.solutions.pose
 
         self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
+            static_image_mode=True,
             max_num_hands=2,
             min_detection_confidence=confidence_threshold,
             min_tracking_confidence=confidence_threshold,
         )
         self.pose = self.mp_pose.Pose(
-            static_image_mode=False,
+            static_image_mode=True,
             model_complexity=1,
             smooth_landmarks=True,
             min_detection_confidence=confidence_threshold,
             min_tracking_confidence=confidence_threshold,
         )
         self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
+            static_image_mode=True,
             max_num_faces=1,
             refine_landmarks=False,
             min_detection_confidence=confidence_threshold,

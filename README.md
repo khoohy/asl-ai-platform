@@ -13,6 +13,7 @@ The repository now includes:
 - `POST /api/inference/mock`
 - React + Vite frontend scaffold
 - browser webcam capture UI wired to the mock backend
+- raw 30-frame rolling ASL model inference in the backend
 - architecture and integration planning docs
 
 Not included yet:

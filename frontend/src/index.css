@@ -280,6 +280,10 @@ code {
   color: #102235;
 }
 
+.secondary-button--inline {
+  margin-top: 0.8rem;
+}
+
 .primary-button:hover,
 .secondary-button:hover {
   transform: translateY(-1px);
@@ -313,6 +317,41 @@ code {
   font-size: clamp(2rem, 4vw, 3.25rem);
   line-height: 1;
   color: #102235;
+}
+
+.topk-block {
+  margin-top: 1.2rem;
+}
+
+.topk-title {
+  margin: 0 0 0.7rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #57718d;
+}
+
+.topk-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.topk-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(16, 34, 53, 0.05);
+}
+
+.inline-message--compact {
+  margin-top: 0;
 }
 
 .button-row {

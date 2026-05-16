@@ -1,85 +1,204 @@
 # ASL AI Platform
 
-`asl-ai-platform` is a full-stack real-time American Sign Language recognition platform built around an existing production ASL sequence model. This repository is the application and runtime layer: FastAPI backend, React frontend, live webcam experience, runtime stabilization, and product-facing integration logic.
+A production-oriented full-stack platform for real-time **American Sign Language (ASL) recognition** using a **React frontend**, **FastAPI backend**, **MediaPipe-based landmark extraction**, and a **30-frame temporal PyTorch model** with live stabilization logic.
 
-This repo is intentionally separate from the older ASL research and training repo. The model contract stays the same, while the platform focuses on live inference usability, deployment shape, and frontend/backend orchestration.
+This repository is the **product/platform layer** of the ASL system. It is intentionally separate from the original training/research repository so the app, API, runtime serving logic, and frontend experience can evolve cleanly without dragging the full experimental codebase into production.
 
-## What This Project Does
+---
 
-- opens a browser webcam feed
-- shows live hand keypoints in the frontend
-- captures frames continuously while the camera is on
-- converts valid hand-present frames into `180D` feature vectors in the backend
-- maintains a rolling `30`-frame temporal buffer
-- runs the real production ASL model on `1 x 30 x 180`
-- applies runtime stabilization, idle handling, and transition holds
-- returns stabilized live sign output to the UI
+## Overview
 
-## Current Capabilities
+**ASL AI Platform** turns a webcam stream into live ASL predictions through a browser-based interface.
 
-- FastAPI backend with lightweight `/health`
-- React + Vite frontend for live webcam recognition
-- production checkpoint loading
-- MediaPipe-based backend preprocessing
-- browser-side keypoint overlay for low-latency visual feedback
-- hot background buffering while the camera is on
-- real model inference with rolling `30`-frame session state
-- stabilization logic ported from the older live runtime
-- idle and no-hands safety behavior
-- latency and runtime metrics in Advanced details
+The system captures webcam frames in the frontend, sends them to a FastAPI backend, extracts hand/pose/face landmarks, constructs the deployed **180-dimensional feature representation**, maintains a **30-frame rolling sequence buffer**, runs the trained temporal model, and applies **runtime stabilization logic** so predictions are more usable in live settings.
 
-## Not Included Yet
+This platform is built around the deployed ASL recognition path, not just raw model inference. It includes:
 
-- authentication
-- WebSockets / streaming transport
-- Docker deployment
-- sentence-level translation
-- TTS
-- persistent session storage
+- real webcam capture in the browser
+- frontend hand landmark overlay
+- backend MediaPipe preprocessing
+- deployed **30 x 180** temporal inference path
+- rolling session buffer
+- runtime stabilization and confidence control
+- hot-buffer behavior so recognition can start from already collected context
+- idle / no-hands handling for live usability
 
-## Architecture Diagram
+---
 
-```mermaid
-flowchart LR
-    A[Browser Webcam] --> B[React Frontend]
-    B --> C[Frontend Hand Keypoint Overlay]
-    B --> D[Frame Capture 480px JPEG]
-    D --> E[POST /api/inference/frame]
-    E --> F[FastAPI Backend]
-    F --> G[FrameProcessor]
-    G --> H[MediaPipe Hands / Pose / Face]
-    H --> I[180D Feature Vector]
-    I --> J[Runtime Session Buffer 30 Frames]
-    J --> K[PyTorch ASL Model]
-    K --> L[Raw Top-K Predictions]
-    L --> M[Runtime Stabilization]
-    M --> N[Live Prediction UI]
+## Key Features
+
+- **Real-time webcam ASL recognition** in the browser
+- **FastAPI backend** for model serving and runtime orchestration
+- **React + Vite frontend** for live camera, controls, and prediction display
+- **MediaPipe-powered feature extraction** using:
+  - hands
+  - selected upper-body pose joints
+  - compact face landmarks
+- **180D per-frame feature representation**
+- **30-frame rolling temporal inference**
+- **Runtime stabilization layer** including:
+  - vote window
+  - confidence thresholds
+  - adaptive fallback
+  - confusion-pair suppression
+  - peak-sign preservation
+  - no-hands grace handling
+- **Hot-buffer recognition flow**
+  - camera on starts background buffering
+  - recognition can use an already warm buffer
+- **Frontend keypoint overlay**
+  - browser-side hand landmarks for low-lag visual feedback
+- **Released-style UI**
+  - cleaner user-facing interface
+  - compact controls
+  - sticky live prediction panel
+  - Top-5 model guesses
+
+---
+
+## System Architecture
+
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│                            Frontend (React)                         │
+│                                                                      │
+│  Webcam Feed ──> Browser Capture ──> JPEG Frame ──> POST /frame      │
+│       │                                                              │
+│       └──> Frontend Hand Landmark Overlay (browser-side MediaPipe)   │
+└──────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Backend (FastAPI)                            │
+│                                                                      │
+│  Base64 Decode                                                       │
+│      ↓                                                               │
+│  Image Decode / Resize                                               │
+│      ↓                                                               │
+│  MediaPipe Extraction                                                │
+│    - hands every frame                                               │
+│    - pose/face reused across short strides                           │
+│      ↓                                                               │
+│  180D Feature Construction                                           │
+│      ↓                                                               │
+│  Rolling Session Buffer (30 frames)                                  │
+│      ↓                                                               │
+│  PyTorch Temporal Model                                              │
+│      ↓                                                               │
+│  Runtime Stabilization Layer                                         │
+│    - vote window                                                     │
+│    - confidence gating                                               │
+│    - adaptive fallback                                               │
+│    - confusion suppression                                           │
+│    - peak-sign preservation                                          │
+│    - idle / no-hands handling                                        │
+└──────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                           Live UI Output                             │
+│                                                                      │
+│  Stable Prediction                                                   │
+│  Raw Prediction                                                      │
+│  Top-5 Guesses                                                       │
+│  Buffer Progress / Readiness                                         │
+│  Waiting / Holding / Recognition Status                              │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Runtime Flow
+## Inference Flow
 
-1. The user clicks `Start Camera`.
-2. The frontend starts the webcam and immediately begins background frame submission.
-3. The backend processes hand-present frames into `180D` vectors and warms the rolling `30`-frame buffer.
-4. The user clicks `Start Recognition`.
-5. Recognition uses the current hot buffer instead of starting from zero.
-6. Once `30` valid frames are available, the backend runs the production temporal model.
-7. Raw Top-K outputs pass through stabilization logic before becoming the main displayed result.
-8. Brief hand loss enters `holding_context`; longer loss clears stale state and returns `waiting_for_hands`.
+1. User starts the camera in the browser.
+2. The frontend begins sending captured frames to the backend.
+3. The backend decodes the image and runs MediaPipe extraction.
+4. A valid frame is converted into a 180D feature vector.
+5. The session buffer stores the latest 30 valid frames.
+6. Once enough temporal context exists, the PyTorch model runs on the current `1 x 30 x 180` sequence.
+7. Raw predictions are passed through the stabilization layer.
+8. The frontend displays:
+   - stable prediction
+   - raw prediction
+   - Top-5 guesses
+   - runtime state (`warming_up`, `holding_context`, `waiting_for_hands`, etc.)
 
-## Model Contract
+---
 
-The platform preserves the existing production model assumptions:
+## Why This Project Exists
 
-- sequence length: `30`
-- input dimension: `180`
-- feature layout:
-  - hands: `126`
-  - pose: `21`
-  - face: `33`
-- checkpoint path: `backend/models/asl_wlasl300_realtime.pt`
+The original ASL repository focused on training, experiments, and model evolution.
 
-This project does not retrain the model, change the checkpoint, or alter the `180D` feature order.
+This repository focuses on serving and productization:
+
+- API boundary
+- frontend UX
+- runtime session logic
+- live stabilization behavior
+- browser integration
+- maintainable deployment structure
+
+In other words:
+
+- old repo = research + training + model experimentation
+- this repo = application platform + runtime serving + live user experience
+
+---
+
+## Current Scope
+
+### Included
+
+- FastAPI backend
+- React + Vite frontend
+- webcam capture UI
+- frontend hand keypoint overlay
+- real deployed model loading
+- 180D frame preprocessing
+- real 30-frame rolling ASL inference
+- runtime stabilization
+- hot-buffer recognition flow
+- no-hands grace and idle handling
+- Top-5 live guess display
+- architecture and component documentation
+
+### Not Included Yet
+
+- authentication
+- WebSocket streaming
+- Docker deployment
+- sentence-level translation
+- TTS in the web app
+- cloud deployment
+- CI/CD pipeline
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- React
+- Vite
+- JavaScript
+- browser MediaPipe Tasks Vision for low-lag hand overlay
+
+### Backend
+
+- FastAPI
+- Uvicorn
+- PyTorch
+- MediaPipe
+- OpenCV
+- NumPy
+- Pydantic
+
+### Model Runtime
+
+- temporal sequence model
+- deployed input contract: 30 frames x 180 features
+- rolling buffer inference
+- stabilization and live-session decision logic
+
+---
 
 ## Project Structure
 
@@ -91,7 +210,8 @@ asl-ai-platform/
 │   │   ├── core/
 │   │   ├── ml/
 │   │   ├── schemas/
-│   │   └── services/
+│   │   ├── services/
+│   │   └── main.py
 │   ├── artifacts/
 │   ├── models/
 │   ├── scripts/
@@ -104,15 +224,16 @@ asl-ai-platform/
 │   └── INTEGRATION_PLAN.md
 ├── frontend/
 │   ├── src/
-│   ├── README.md
+│   ├── scripts/
 │   ├── package.json
-│   └── vite.config.js
+│   ├── vite.config.js
+│   └── README.md
 └── README.md
 ```
 
-## Setup
+---
 
-### Backend
+## Backend Setup
 
 From the repository root:
 
@@ -123,13 +244,13 @@ pip install -r backend\requirements.txt
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-Backend URL:
+Backend runs at:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-### Frontend
+## Frontend Setup
 
 From the `frontend/` directory:
 
@@ -138,72 +259,153 @@ npm install
 npm run dev
 ```
 
-Frontend URL:
+Frontend runs at:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-## Main API Routes
+---
 
-- `GET /health`
-- `POST /api/inference/mock`
-- `POST /api/inference/frame-debug`
-- `POST /api/inference/frame`
-- `POST /api/inference/reset-session`
+## How to Use
 
-## Live Recognition UX
+### Normal Live Flow
 
-- `Start Camera`
-  - starts webcam
-  - starts background buffering immediately
-- `Start Recognition`
-  - switches into active recognition mode
-  - uses the current hot buffer
-- `Stop Recognition`
-  - pauses recognition output
-  - preserves the buffer while the camera stays on
-- `Stop Camera`
-  - stops webcam
-  - clears session state
-- `Reset`
-  - clears the active backend session
+1. Start backend
+2. Start frontend
+3. Open the browser app
+4. Click `Start Camera`
+5. Put hands in frame
+6. Let the buffer warm
+7. Click `Start Recognition`
+8. View:
+   - stable prediction
+   - raw prediction
+   - Top-5 guesses
+   - buffer readiness
+   - waiting / holding / recognition status
+
+### Runtime Behavior
+
+- Camera on starts buffer warming in the background
+- Recognition on uses the current hot buffer instead of starting from zero
+- Brief hand loss stays in `holding_context`
+- Longer absence transitions to `waiting_for_hands`
+- No-hand frames do not warm the buffer
+- Hand-present valid frames can warm the buffer naturally
+
+---
+
+## API Endpoints
+
+### `GET /health`
+
+Basic backend health check.
+
+### `POST /api/inference/frame`
+
+Primary live inference endpoint.
+
+Used by the frontend for:
+
+- background buffer warming
+- active recognition
+- runtime state updates
+
+### `POST /api/inference/reset-session`
+
+Clears current session state and rolling buffer.
+
+### `POST /api/inference/mock`
+
+Legacy/dev endpoint kept for internal testing.  
+Not part of the main released UI flow.
+
+---
+
+## Runtime Design Notes
+
+### 30-Frame Temporal Contract
+
+The deployed model is not a single-frame classifier.  
+It expects a rolling temporal input of:
+
+- `30 frames x 180 features`
+
+That is why the runtime is built around:
+
+- session buffers
+- warm-up logic
+- context hold behavior
+- stabilized output rather than naive per-frame guesses
+
+### 180D Feature Representation
+
+Each valid frame is encoded using:
+
+- hand landmarks
+- selected pose joints
+- compact face landmarks
+
+### Stabilization Philosophy
+
+The runtime layer does more than just call the model. It includes:
+
+- confidence thresholds
+- adaptive fallback
+- runner-up margin checks
+- confusion-pair suppression
+- peak-sign preservation
+- vote window logic
+- idle/no-hands safety
+
+This is essential for live usability.
+
+---
 
 ## Performance Notes
 
-Current live capture is tuned for lower latency:
+Recent optimizations include:
 
-- capture interval: `100ms`
-- capture width: `480px`
-- capture format: `image/jpeg`
-- JPEG quality: `0.6`
+- frontend hand overlay moved fully into the browser
+- pose/face reuse across short backend strides
+- smaller JPEG capture payloads
+- hot-buffer recognition flow
+- cleaner control-state logic
 
-The backend also reuses pose and face landmarks across short strides while still running hand detection every frame.
+The biggest remaining future architecture upgrade for even lower latency would likely be:
 
-## Why This Repo Is Separate
+- WebSocket streaming instead of HTTP-per-frame
 
-The older ASL repo remains the research and model-development source. This platform repo exists so the application can evolve independently:
+That is intentionally deferred for now.
 
-- frontend UX and product behavior
-- API boundaries
-- runtime stabilization
-- latency profiling
-- deployment-oriented structure
-
-That keeps training code, datasets, and experiments out of the main product repo.
+---
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Integration plan](docs/INTEGRATION_PLAN.md)
-- [Changelog](docs/CHANGELOG.md)
-- [Component anatomy](docs/COMPONENT_ANATOMY.md)
-- [Backend guide](backend/README.md)
-- [Frontend guide](frontend/README.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Change history: [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- Detailed component breakdown: [docs/COMPONENT_ANATOMY.md](docs/COMPONENT_ANATOMY.md)
+- Integration planning: [docs/INTEGRATION_PLAN.md](docs/INTEGRATION_PLAN.md)
+- Backend guide: [backend/README.md](backend/README.md)
+- Frontend guide: [frontend/README.md](frontend/README.md)
+
+---
 
 ## Roadmap
 
-1. Continue refining live inference responsiveness and UX.
-2. Add a more streaming-oriented transport layer when needed.
-3. Add containerization and environment-specific deployment setup.
-4. Add CI, automated browser checks, and broader runtime regression coverage.
+### Near-term
+
+- refine final live UX
+- tune latency further
+- improve deployment readiness
+- polish project presentation
+
+### Later
+
+- WebSocket streaming
+- Dockerization
+- deployment config
+- CI/CD
+- sentence-level or multi-sign extensions
+- optional web-based TTS

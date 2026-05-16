@@ -28,6 +28,10 @@ The current system is a browser-to-backend ASL inference prototype with these la
   - returns unstabilized Top-K labels and confidences from the model
 - Stabilization layer
   - converts raw model guesses into more usable live output through confidence, vote, peak, confusion, and motion checks
+- Idle-state recovery
+  - preserves context briefly when hands disappear
+  - clears runtime state after prolonged hand loss
+  - returns back to waiting instead of predicting from stale buffers
 
 ## B. Frontend anatomy
 
@@ -439,6 +443,7 @@ Input and output:
     - stabilization thresholds
     - confusion-pair definitions
     - sign-specific motion and confidence overrides
+    - hand-loss grace and idle-state status codes
 
 Dependency on old ASL system:
 
@@ -513,6 +518,7 @@ Input and output:
     - feature vector or `None`
     - feature dimension
     - note
+    - hand-presence flags
 
 Dependency on old ASL system:
 
@@ -528,6 +534,7 @@ Responsibility:
 
 - hold one session's rolling feature buffer and counters
 - retain per-session stabilization history and last stable output metadata
+- track missing-hand counts, grace frames remaining, and idle state
 
 Input and output:
 
@@ -579,6 +586,7 @@ Responsibility:
 - append valid features into the session buffer
 - run the model when the buffer reaches 30 valid frames
 - pass raw predictions through the stabilization layer
+- suspend or clear runtime context when hands are absent
 
 Input and output:
 
@@ -587,7 +595,9 @@ Input and output:
   - optional session id
 - output:
   - warming-up responses
-  - no-landmark responses
+  - no-landmark or no-hand responses
+  - holding-context responses during short hand loss
+  - waiting-for-hands responses after idle clearing
   - raw Top-K model outputs
   - stabilization-aware responses that include raw and stable fields
 
@@ -643,16 +653,18 @@ The current real inference lifecycle is:
 10. MediaPipe extracts hand, pose, and face landmarks.
 11. The preprocessing layer constructs the production-aligned 180D feature vector.
 12. The session manager retrieves or creates the runtime session state.
-13. The runtime session appends the valid 180D vector to the rolling buffer.
-14. If the frame produced no usable landmarks, the backend returns `no_landmarks` and does not append invalid data.
-15. If the buffer holds fewer than 30 valid frames, the backend returns `warming_up`.
-16. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
-17. The PyTorch model runs a forward pass under `torch.no_grad()`.
-18. Softmax probabilities are computed.
-19. The Top-K class indices are mapped to labels with the label map.
-20. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
-21. The backend returns both raw and stabilized prediction data to the frontend.
-22. The frontend updates status, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
+13. If no hands are visible, the backend increments the missing-hands counter.
+14. During the grace window, the backend returns `holding_context` and keeps the current buffer without appending invalid frames.
+15. After the grace window expires, the backend clears the rolling buffer and stabilization history and returns `waiting_for_hands`.
+16. If hands are visible, the runtime session appends the valid 180D vector to the rolling buffer.
+17. If the buffer holds fewer than 30 valid frames, the backend returns `warming_up`.
+18. Once the buffer reaches 30 valid frames, the engine stacks the sequence into shape `1 x 30 x 180`.
+19. The PyTorch model runs a forward pass under `torch.no_grad()`.
+20. Softmax probabilities are computed.
+21. The Top-K class indices are mapped to labels with the label map.
+22. The stabilization layer evaluates confidence, margin, votes, confusion pairs, peak history, and motion requirements.
+23. The backend returns both raw and stabilized prediction data to the frontend.
+24. The frontend updates status, prediction, confidence, stabilization state, Top-K list, and frame counters in the UI.
 
 ## F. Current limitations
 

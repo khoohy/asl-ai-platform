@@ -5,6 +5,7 @@ Phase 4E adds runtime stabilization on top of the continuous 30-frame real infer
 ## Features in this phase
 
 - dashboard shell for `ASL AI Platform`
+- responsive live inference layout with webcam and prediction visible together on desktop
 - backend health status panel
 - webcam panel with browser camera access
 - single-frame capture to base64
@@ -124,6 +125,15 @@ This phase proves that the browser can:
 - show when the backend is still collecting votes
 - show when a stable output has been accepted
 - show when the output is held for low confidence, confusion, or motion reasons
+
+## Live dashboard layout
+
+- desktop:
+  - larger left column for webcam preview and capture controls
+  - right column for sticky live prediction output, stabilization state, compact Top-K, and collapsible runtime stats
+- mobile:
+  - webcam and prediction stack vertically
+  - the prediction card stays directly under the webcam section
 
 ## Raw prediction note
 

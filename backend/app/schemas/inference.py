@@ -44,6 +44,9 @@ class RealInferenceResponse(BaseModel):
     prediction: str | None
     confidence: float
     top_k: list[TopKPrediction]
+    hands_detected: bool = False
+    missing_hands_count: int = 0
+    grace_frames_remaining: int = 0
     raw_prediction: str | None = None
     raw_confidence: float = 0.0
     stable_prediction: str | None = None

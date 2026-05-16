@@ -9,6 +9,7 @@ export default function WebcamPanel({
   inferenceResult,
   onCaptureAndRunRealInference,
   onResetRealInferenceSession,
+  onRuntimeStatsChange,
 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -35,6 +36,26 @@ export default function WebcamPanel({
   useEffect(() => {
     runRealInferenceRef.current = onCaptureAndRunRealInference;
   }, [onCaptureAndRunRealInference]);
+
+  useEffect(() => {
+    onRuntimeStatsChange?.({
+      framesSent,
+      successfulResponses,
+      failedResponses,
+      captureIntervalMs: CAPTURE_INTERVAL_MS,
+      isRequestInFlight,
+      isCameraActive,
+      isInferenceSessionRunning,
+    });
+  }, [
+    failedResponses,
+    framesSent,
+    isCameraActive,
+    isInferenceSessionRunning,
+    isRequestInFlight,
+    onRuntimeStatsChange,
+    successfulResponses,
+  ]);
 
   function stopInferenceSession(options = {}) {
     const { updateStatus = true } = options;
@@ -166,6 +187,10 @@ export default function WebcamPanel({
   }
 
   async function handleManualRealInference() {
+    if (isInferenceSessionRunning || requestInFlightRef.current) {
+      return;
+    }
+
     requestInFlightRef.current = true;
     setIsRequestInFlight(true);
 
@@ -180,6 +205,10 @@ export default function WebcamPanel({
   }
 
   function handleStartInferenceSession() {
+    if (requestInFlightRef.current || isInferenceSessionRunning) {
+      return;
+    }
+
     if (!isCameraActive) {
       setCaptureStatus("Start the camera before starting a real inference session.");
       return;
@@ -215,6 +244,10 @@ export default function WebcamPanel({
   }
 
   async function handleResetSession() {
+    if (isInferenceSessionRunning || isResetting) {
+      return;
+    }
+
     const response = await onResetRealInferenceSession();
     if (response?.status === "reset") {
       setFramesSent(0);
@@ -236,6 +269,12 @@ export default function WebcamPanel({
         <div>
           <p className="eyebrow">Webcam real flow</p>
           <h2>Camera capture</h2>
+        </div>
+        <div className={`live-indicator ${isInferenceSessionRunning ? "live-indicator--active" : ""}`}>
+          <span className="live-indicator__dot" />
+          <span className="metric-code">
+            {isInferenceSessionRunning ? "session_live" : "session_idle"}
+          </span>
         </div>
       </div>
 
@@ -261,69 +300,119 @@ export default function WebcamPanel({
         ) : null}
       </div>
 
-      <div className="button-row">
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={startCamera}
-          disabled={isStartingCamera || isCameraActive}
-        >
-          {isStartingCamera ? "Starting camera..." : "Start Camera"}
-        </button>
+      <div className="webcam-status-stack">
+        <div className="status-message-box">
+          <p className="status-message-box__line metric-code">{cameraStatus}</p>
+          <p className="status-message-box__line metric-code">{captureStatus}</p>
+        </div>
 
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={stopCamera}
-          disabled={!isCameraActive}
+        <p
+          className={`inline-message inline-message--compact helper-message ${
+            cameraError || error ? "inline-message--error" : ""
+          }`}
         >
-          Stop Camera
-        </button>
-      </div>
+          {cameraError ||
+            error ||
+            (inferenceResult?.status && inferenceResult.status !== "mock"
+              ? inferenceResult.note
+              : "") ||
+            "Allow browser camera permission and capture multiple frames to fill the 30-frame buffer."}
+        </p>
 
-      <div className="button-row">
-        <button
-          type="button"
-          className="primary-button"
-          onClick={handleManualRealInference}
-          disabled={!isCameraActive || isLoading || isRequestInFlight}
-        >
-          {isLoading || isRequestInFlight
-            ? "Capturing manual real frame..."
-            : "Capture frame and run real inference"}
-        </button>
-
-        <button
-          type="button"
-          className="primary-button primary-button--accent"
-          onClick={handleStartInferenceSession}
-          disabled={!isCameraActive || isInferenceSessionRunning}
-        >
+        <p className="inline-message inline-message--compact helper-message helper-message--secondary">
           {isInferenceSessionRunning
-            ? "Real inference session running"
-            : "Start Real Inference Session"}
-        </button>
-
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() => stopInferenceSession({ updateStatus: true })}
-          disabled={!isInferenceSessionRunning}
-        >
-          Stop Real Inference Session
-        </button>
-
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={handleResetSession}
-          disabled={isResetting}
-        >
-          {isResetting ? "Resetting session..." : "Reset Real Inference Session"}
-        </button>
+            ? "Manual capture is disabled while live inference is running. Stop the live session to submit a single frame or reset the session."
+            : "Manual capture is available while the live inference session is stopped."}
+        </p>
       </div>
 
-      <dl className="meta-grid meta-grid--single">
+      <div className="control-panel">
+        <div className="control-grid control-grid--camera">
+          <button
+            type="button"
+            className="secondary-button secondary-button--ghost control-button"
+            onClick={startCamera}
+            disabled={isStartingCamera || isCameraActive}
+          >
+            <span className="control-button__label">Start Camera</span>
+            <span className="control-button__state metric-code">
+              {isStartingCamera ? "booting" : "ready"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button secondary-button--ghost control-button"
+            onClick={stopCamera}
+            disabled={!isCameraActive}
+          >
+            <span className="control-button__label">Stop Camera</span>
+            <span className="control-button__state metric-code">
+              {isCameraActive ? "online" : "idle"}
+            </span>
+          </button>
+        </div>
+
+        <div className="control-grid control-grid--inference">
+          <button
+            type="button"
+            className="secondary-button secondary-button--emphasis control-button control-button--wide"
+            onClick={handleManualRealInference}
+            disabled={
+              !isCameraActive ||
+              isLoading ||
+              isRequestInFlight ||
+              isInferenceSessionRunning
+            }
+          >
+            <span className="control-button__label">Capture frame and run real inference</span>
+            <span className="control-button__state metric-code">
+              {isRequestInFlight && !isInferenceSessionRunning ? "sending" : "manual"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="primary-button primary-button--accent control-button control-button--wide"
+            onClick={handleStartInferenceSession}
+            disabled={
+              !isCameraActive ||
+              isInferenceSessionRunning ||
+              isRequestInFlight ||
+              isLoading
+            }
+          >
+            <span className="control-button__label">Start Real Inference Session</span>
+            <span className="control-button__state metric-code">
+              {isInferenceSessionRunning ? "live" : "armed"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button secondary-button--danger control-button"
+            onClick={() => stopInferenceSession({ updateStatus: true })}
+            disabled={!isInferenceSessionRunning}
+          >
+            <span className="control-button__label">Stop Real Inference Session</span>
+            <span className="control-button__state metric-code">halt</span>
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button secondary-button--danger control-button"
+            onClick={handleResetSession}
+            disabled={isResetting || isInferenceSessionRunning}
+          >
+            <span className="control-button__label">Reset Real Inference Session</span>
+            <span className="control-button__state metric-code">
+              {isResetting ? "resetting" : "clear"}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <dl className="meta-grid meta-grid--camera">
         <div>
           <dt>Camera status</dt>
           <dd>{cameraStatus}</dd>
@@ -334,7 +423,7 @@ export default function WebcamPanel({
         </div>
         <div>
           <dt>Live session state</dt>
-          <dd>
+          <dd className="metric-code">
             {inferenceResult?.status ?? "idle"} |{" "}
             {typeof inferenceResult?.frames_collected === "number" &&
             typeof inferenceResult?.sequence_length === "number"
@@ -344,7 +433,7 @@ export default function WebcamPanel({
         </div>
         <div>
           <dt>Stabilization state</dt>
-          <dd>
+          <dd className="metric-code">
             {inferenceResult?.stabilization_status ?? "raw_only"} |{" "}
             {typeof inferenceResult?.vote_count === "number" &&
             typeof inferenceResult?.vote_window_size === "number"
@@ -353,25 +442,15 @@ export default function WebcamPanel({
           </dd>
         </div>
         <div>
-          <dt>Runtime stats</dt>
-          <dd>
-            {`frames sent ${framesSent}, responses ok ${successfulResponses}, failed ${failedResponses}, interval ${CAPTURE_INTERVAL_MS}ms, in flight ${isRequestInFlight ? "yes" : "no"}`}
+          <dt>Session progress</dt>
+          <dd className="metric-code">
+            {typeof inferenceResult?.frames_collected === "number" &&
+            typeof inferenceResult?.sequence_length === "number"
+              ? `${inferenceResult.frames_collected}/${inferenceResult.sequence_length} frames with ${inferenceResult?.vote_count ?? 0}/${inferenceResult?.vote_window_size ?? 10} stabilization votes`
+              : "Waiting for frames to enter the rolling buffer."}
           </dd>
         </div>
       </dl>
-
-      <p
-        className={`inline-message ${
-          cameraError || error ? "inline-message--error" : ""
-        }`}
-      >
-        {cameraError ||
-          error ||
-          (inferenceResult?.status && inferenceResult.status !== "mock"
-            ? inferenceResult.note
-            : "") ||
-          "Allow browser camera permission and capture multiple frames to fill the 30-frame buffer."}
-      </p>
 
       <canvas ref={canvasRef} className="hidden-canvas" aria-hidden="true" />
     </section>

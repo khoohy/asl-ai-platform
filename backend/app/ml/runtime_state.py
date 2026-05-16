@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from app.ml.runtime_config import (
+    HAND_LOSS_GRACE_FRAMES,
     INPUT_DIM,
     PEAK_HISTORY_WINDOW,
     SEQUENCE_LENGTH,
@@ -36,6 +37,9 @@ class RuntimeSessionState:
     last_raw_confidence: float = 0.0
     stabilization_status: str = "raw_only"
     last_motion_score: float = 0.0
+    missing_hands_count: int = 0
+    hand_grace_remaining: int = HAND_LOSS_GRACE_FRAMES
+    is_idle: bool = True
 
     def __post_init__(self) -> None:
         self.feature_buffer = deque(maxlen=self.sequence_length)
@@ -58,12 +62,10 @@ class RuntimeSessionState:
             )
         return np.stack(self.feature_buffer, axis=0).astype(np.float32)
 
-    def reset(self) -> None:
+    def clear_runtime_context(self) -> None:
         self.feature_buffer.clear()
-        self.total_frames_received = 0
         self.valid_frames_collected = 0
         self.last_prediction = None
-        self.last_status = "reset"
         self.prediction_history.clear()
         self.peak_history.clear()
         self.last_stable_prediction = None
@@ -72,3 +74,11 @@ class RuntimeSessionState:
         self.last_raw_confidence = 0.0
         self.stabilization_status = "raw_only"
         self.last_motion_score = 0.0
+
+    def reset(self) -> None:
+        self.clear_runtime_context()
+        self.total_frames_received = 0
+        self.last_status = "reset"
+        self.missing_hands_count = 0
+        self.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
+        self.is_idle = True

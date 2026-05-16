@@ -17,6 +17,15 @@ const REAL_INFERENCE_SESSION_ID = "default";
 export default function App() {
   const [health, setHealth] = useState(null);
   const [prediction, setPrediction] = useState(null);
+  const [runtimeStats, setRuntimeStats] = useState({
+    framesSent: 0,
+    successfulResponses: 0,
+    failedResponses: 0,
+    captureIntervalMs: 200,
+    isRequestInFlight: false,
+    isCameraActive: false,
+    isInferenceSessionRunning: false,
+  });
   const [healthError, setHealthError] = useState("");
   const [manualInferenceError, setManualInferenceError] = useState("");
   const [realInferenceError, setRealInferenceError] = useState("");
@@ -56,6 +65,13 @@ export default function App() {
         frames_collected: 0,
         sequence_length: 30,
         top_k: [],
+        raw_prediction: response.prediction,
+        raw_confidence: response.confidence,
+        stable_prediction: null,
+        stable_confidence: 0,
+        stabilization_status: "mock",
+        vote_count: 0,
+        vote_window_size: 10,
       });
     } catch (error) {
       setPrediction(null);
@@ -139,14 +155,16 @@ export default function App() {
 
       <main className="dashboard">
         <section className="hero">
-          <p className="eyebrow">Phase 4E stabilized real inference</p>
-          <h1>ASL AI Platform</h1>
-          <p className="hero-copy">
-            A browser-first dashboard for validating backend availability,
-            capturing webcam frames continuously, filling a 30-frame rolling
-            buffer automatically, and testing raw plus stabilized ASL model
-            inference during live webcam use.
-          </p>
+          <div className="hero-intro">
+            <p className="eyebrow">Phase 4E stabilized real inference</p>
+            <h1>ASL AI Platform</h1>
+            <p className="hero-copy">
+              A browser-first dashboard for validating backend availability,
+              capturing webcam frames continuously, filling a 30-frame rolling
+              buffer automatically, and testing raw plus stabilized ASL model
+              inference during live webcam use.
+            </p>
+          </div>
 
           <div className="hero-meta">
             <div>
@@ -164,7 +182,28 @@ export default function App() {
           </div>
         </section>
 
-        <section className="dashboard-grid">
+        <section className="live-dashboard">
+          <div className="live-dashboard__main">
+            <WebcamPanel
+              isLoading={isRealInferenceLoading}
+              isResetting={isSessionResetting}
+              error={realInferenceError}
+              inferenceResult={prediction}
+              onCaptureAndRunRealInference={handleCaptureAndRunRealInference}
+              onResetRealInferenceSession={handleResetRealInferenceSession}
+              onRuntimeStatsChange={setRuntimeStats}
+            />
+          </div>
+
+          <aside className="live-dashboard__sidebar">
+            <PredictionCard
+              prediction={prediction}
+              runtimeStats={runtimeStats}
+            />
+          </aside>
+        </section>
+
+        <section className="support-grid">
           <HealthStatus
             health={health}
             isLoading={isHealthLoading}
@@ -172,22 +211,11 @@ export default function App() {
             onRefresh={loadHealth}
           />
 
-          <WebcamPanel
-            isLoading={isRealInferenceLoading}
-            isResetting={isSessionResetting}
-            error={realInferenceError}
-            inferenceResult={prediction}
-            onCaptureAndRunRealInference={handleCaptureAndRunRealInference}
-            onResetRealInferenceSession={handleResetRealInferenceSession}
-          />
-
           <MockInferencePanel
             isLoading={isManualInferenceLoading}
             error={manualInferenceError}
             onRunInference={handleRunInference}
           />
-
-          <PredictionCard prediction={prediction} />
         </section>
       </main>
     </div>

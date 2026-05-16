@@ -9,7 +9,16 @@ import torch
 
 from app.ml.frame_processor import FrameProcessor
 from app.ml.model_loader import ASLModelLoader
-from app.ml.runtime_config import INPUT_DIM, MODEL_SOURCE, SEQUENCE_LENGTH, TOP_K
+from app.ml.runtime_config import (
+    HAND_LOSS_GRACE_FRAMES,
+    HOLDING_CONTEXT_STATUS,
+    IDLE_STATUS,
+    INPUT_DIM,
+    MODEL_SOURCE,
+    SEQUENCE_LENGTH,
+    TOP_K,
+    WAITING_FOR_HANDS_STATUS,
+)
 from app.ml.session_manager import SessionManager
 from app.ml.stabilization import ASLStabilizer
 
@@ -49,7 +58,13 @@ class RuntimeInferenceEngine:
         session.total_frames_received += 1
 
         frame_result = frame_processor.process_base64_image(image_base64)
+        if frame_result.status in {"no_hands", "no_landmarks"}:
+            return self._handle_missing_hands(session, frame_result)
+
         if frame_result.status != "ok" or frame_result.feature_vector is None:
+            session.is_idle = False
+            session.missing_hands_count = 0
+            session.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
             session.last_status = frame_result.status
             return self._base_response(
                 session=session,
@@ -59,8 +74,12 @@ class RuntimeInferenceEngine:
                     + f" No valid frame was added. Buffer remains at "
                     f"{session.valid_frames_collected}/{session.sequence_length}."
                 ),
+                hands_detected=True,
             )
 
+        session.is_idle = False
+        session.missing_hands_count = 0
+        session.hand_grace_remaining = HAND_LOSS_GRACE_FRAMES
         session.append(frame_result.feature_vector)
 
         if session.valid_frames_collected < session.sequence_length:
@@ -72,6 +91,7 @@ class RuntimeInferenceEngine:
                     f"Collecting valid frames: "
                     f"{session.valid_frames_collected}/{session.sequence_length}"
                 ),
+                hands_detected=True,
             )
 
         sequence = session.stack_sequence()
@@ -133,6 +153,7 @@ class RuntimeInferenceEngine:
             prediction=stabilization.prediction,
             confidence=stabilization.confidence,
             top_k=top_k_predictions,
+            hands_detected=True,
             raw_prediction=stabilization.raw_prediction,
             raw_confidence=stabilization.raw_confidence,
             stable_prediction=stabilization.stable_prediction,
@@ -154,6 +175,46 @@ class RuntimeInferenceEngine:
             "session_id": session.session_id,
             "note": "Session buffer cleared",
         }
+
+    def _handle_missing_hands(self, session, frame_result) -> dict[str, Any]:
+        session.missing_hands_count += 1
+        session.hand_grace_remaining = max(
+            HAND_LOSS_GRACE_FRAMES - session.missing_hands_count,
+            0,
+        )
+
+        if session.valid_frames_collected > 0 and session.missing_hands_count <= HAND_LOSS_GRACE_FRAMES:
+            session.last_status = HOLDING_CONTEXT_STATUS
+            session.is_idle = False
+            return self._base_response(
+                session=session,
+                status=HOLDING_CONTEXT_STATUS,
+                note=(
+                    f"{frame_result.note} "
+                    "Holding context while hands are temporarily missing. "
+                    f"Grace remaining: {session.hand_grace_remaining}/{HAND_LOSS_GRACE_FRAMES}. "
+                    "No new frame was added."
+                ),
+                hands_detected=False,
+                missing_hands_count=session.missing_hands_count,
+                grace_frames_remaining=session.hand_grace_remaining,
+            )
+
+        session.clear_runtime_context()
+        session.is_idle = True
+        session.last_status = WAITING_FOR_HANDS_STATUS if session.missing_hands_count > 0 else IDLE_STATUS
+        session.hand_grace_remaining = 0
+        return self._base_response(
+            session=session,
+            status=session.last_status,
+            note=(
+                f"{frame_result.note} Waiting for hands. "
+                "The rolling buffer and stabilization history were cleared."
+            ),
+            hands_detected=False,
+            missing_hands_count=session.missing_hands_count,
+            grace_frames_remaining=0,
+        )
 
     def _get_model_loader(self) -> ASLModelLoader:
         if self.model_loader is None or not self.model_loader.model_loaded:
@@ -202,6 +263,9 @@ class RuntimeInferenceEngine:
         prediction: str | None = None,
         confidence: float = 0.0,
         top_k: list[dict[str, float | str]] | None = None,
+        hands_detected: bool = False,
+        missing_hands_count: int | None = None,
+        grace_frames_remaining: int | None = None,
         raw_prediction: str | None = None,
         raw_confidence: float = 0.0,
         stable_prediction: str | None = None,
@@ -214,6 +278,17 @@ class RuntimeInferenceEngine:
             "prediction": prediction,
             "confidence": confidence,
             "top_k": top_k or [],
+            "hands_detected": hands_detected,
+            "missing_hands_count": (
+                session.missing_hands_count
+                if missing_hands_count is None
+                else missing_hands_count
+            ),
+            "grace_frames_remaining": (
+                session.hand_grace_remaining
+                if grace_frames_remaining is None
+                else grace_frames_remaining
+            ),
             "raw_prediction": raw_prediction,
             "raw_confidence": raw_confidence,
             "stable_prediction": stable_prediction,

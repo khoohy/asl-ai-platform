@@ -21,6 +21,8 @@ class FrameProcessingResult:
     feature_dim: int
     expected_dim: int
     note: str
+    hands_detected: bool
+    any_landmarks_detected: bool
 
 
 class FrameProcessor:
@@ -55,11 +57,23 @@ class FrameProcessor:
             )
 
         keypoints = extractor.extract_keypoints(frame_bgr)
-        if not self._has_any_landmarks(keypoints):
+        hands_detected = self._has_hand_landmarks(keypoints)
+        any_landmarks_detected = self._has_any_landmarks(keypoints)
+        if not hands_detected:
+            if any_landmarks_detected:
+                return self._result(
+                    "no_hands",
+                    None,
+                    "Pose or face landmarks were detected, but no hands are visible.",
+                    hands_detected=False,
+                    any_landmarks_detected=True,
+                )
             return self._result(
                 "no_landmarks",
                 None,
                 "MediaPipe did not detect usable hand, pose, or face landmarks.",
+                hands_detected=False,
+                any_landmarks_detected=False,
             )
 
         feature_vector = self._build_feature_vector(keypoints)
@@ -68,12 +82,16 @@ class FrameProcessor:
                 "wrong_feature_dim",
                 feature_vector,
                 f"Expected feature vector shape ({INPUT_DIM},), got {feature_vector.shape}.",
+                hands_detected=True,
+                any_landmarks_detected=any_landmarks_detected,
             )
 
         return self._result(
             "ok",
             feature_vector,
             "Frame decoded and converted into a valid 180D feature vector.",
+            hands_detected=True,
+            any_landmarks_detected=any_landmarks_detected,
         )
 
     def _build_feature_vector(self, keypoints_dict: dict[str, np.ndarray]) -> np.ndarray:
@@ -126,10 +144,19 @@ class FrameProcessor:
         )
 
     @staticmethod
+    def _has_hand_landmarks(keypoints_dict: dict[str, np.ndarray]) -> bool:
+        return any(
+            np.any(np.asarray(keypoints_dict.get(key), dtype=np.float32))
+            for key in ("left_hand", "right_hand")
+        )
+
+    @staticmethod
     def _result(
         status: str,
         feature_vector: np.ndarray | None,
         note: str,
+        hands_detected: bool = False,
+        any_landmarks_detected: bool = False,
     ) -> FrameProcessingResult:
         feature_dim = int(feature_vector.shape[0]) if feature_vector is not None else 0
         return FrameProcessingResult(
@@ -138,4 +165,6 @@ class FrameProcessor:
             feature_dim=feature_dim,
             expected_dim=INPUT_DIM,
             note=note,
+            hands_detected=hands_detected,
+            any_landmarks_detected=any_landmarks_detected,
         )

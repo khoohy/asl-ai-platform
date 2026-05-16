@@ -72,3 +72,24 @@ python backend\scripts\test_stabilization.py
 
 - The API now returns both raw and stabilized fields.
 - This phase still does not implement WebSocket streaming, TTS, or sentence-level translation.
+
+## Phase 4F: Idle-state clearing
+
+- Restored old-runtime hand-loss handling so stale buffered context does not keep producing random signs
+- Hand presence is now required for live ASL inference
+- Real inference now distinguishes:
+  - `no_hands`
+  - `no_landmarks`
+  - `holding_context`
+  - `waiting_for_hands`
+- Behavior:
+  - brief hand loss preserves context for a short grace period
+  - prolonged hand loss clears the rolling buffer and stabilization history
+  - idle responses return null predictions instead of stale sign output
+- New smoke test command:
+
+```powershell
+python backend\scripts\test_idle_state.py
+```
+
+- This phase restores the old “Holding context” and “Waiting for hands” behavior without changing the model checkpoint or preprocessing format.

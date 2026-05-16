@@ -65,7 +65,13 @@ def main() -> None:
             f"frame {iteration:02d}: status={response['status']}, "
             f"frames_collected={response['frames_collected']}/{response['sequence_length']}"
         )
-        if iteration < 30 and response["status"] not in {"warming_up", "no_landmarks"}:
+        if iteration < 30 and response["status"] not in {
+            "warming_up",
+            "no_landmarks",
+            "holding_context",
+            "waiting_for_hands",
+            "idle",
+        }:
             print("warning: early response was not warming_up/no_landmarks")
 
     if final_response is None:
@@ -76,6 +82,9 @@ def main() -> None:
         "status",
         "prediction",
         "confidence",
+        "hands_detected",
+        "missing_hands_count",
+        "grace_frames_remaining",
         "raw_prediction",
         "raw_confidence",
         "stable_prediction",

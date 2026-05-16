@@ -437,3 +437,53 @@ Port the old runtime's portable stabilization logic into the FastAPI backend so 
 - backend speech or TTS suppression logic
 - persistent session storage
 - continuous language-level segmentation
+
+## Phase 4F: idle-state clearing for missing hands
+
+### Purpose
+
+Restore the old deployed runtime behavior where brief hand loss preserves context temporarily, but prolonged hand absence clears buffered state and returns the system to an honest waiting-for-hands mode.
+
+### Files created or modified
+
+- created:
+  - `backend/scripts/test_idle_state.py`
+- modified:
+  - `backend/app/ml/runtime_config.py`
+  - `backend/app/ml/frame_processor.py`
+  - `backend/app/ml/runtime_state.py`
+  - `backend/app/ml/inference_engine.py`
+  - `backend/app/schemas/inference.py`
+  - `backend/scripts/test_sequence_inference.py`
+  - `frontend/src/components/PredictionCard.jsx`
+  - `backend/README.md`
+  - `docs/COMPONENT_ANATOMY.md`
+  - `docs/CHANGELOG.md`
+
+### Major design decisions
+
+- treat visible hands as the required signal for ASL inference
+- distinguish `no_hands` from `no_landmarks`
+- preserve rolling context for a short grace period
+- clear the rolling buffer and stabilization history after sustained hand loss
+- return null predictions during idle rather than showing stale or random signs
+
+### Verification and tests performed
+
+- dedicated idle-state smoke test with:
+  - valid-hand warmup
+  - missing-hand grace transition
+  - waiting-for-hands clearing
+- updated sequence inference test output to include hand-loss metadata
+
+### Known limitations
+
+- idle handling is still in-memory and session-local
+- hand-loss timing is frame-count based rather than wall-clock based
+- continuous sentence segmentation is still out of scope
+
+### Intentionally deferred
+
+- persistent session state
+- WebSocket delivery
+- speech or TTS integration

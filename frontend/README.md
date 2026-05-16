@@ -1,28 +1,66 @@
-# Frontend Plan
+# Frontend
 
-The React frontend is intentionally not implemented in Phase 1.
+Phase 2 adds a React + Vite frontend scaffold that can talk to the existing FastAPI mock backend.
 
-## Planned dashboard
+## Features in this phase
 
-This repository will eventually include a webcam-first dashboard that lets a user:
+- dashboard shell for `ASL AI Platform`
+- backend health status panel
+- mock inference test panel
+- prediction display card
+- loading and error states for API calls
 
-- open a live camera preview in the browser
-- capture or stream frames for ASL prediction
-- view the latest prediction, confidence, and system health
-- switch between mock inference and real backend-powered model inference
-- inspect request and response timing for debugging
+## Required backend URL
 
-## Planned frontend responsibilities
+Create a local environment file from the example and point it to the FastAPI backend:
 
-- React application shell and routing
-- webcam access and frame capture flow
-- upload and preview support for still images
-- API integration with the FastAPI backend
-- status panels for backend health and inference results
+```powershell
+Copy-Item .env.example .env
+```
 
-## Not included yet
+Expected value:
 
-- production React code
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+## Setup
+
+From the `frontend/` directory:
+
+```powershell
+npm install
+```
+
+## Run
+
+From the `frontend/` directory:
+
+```powershell
+npm run dev
+```
+
+The Vite dev server runs at `http://127.0.0.1:5173`.
+
+## Backend requirement
+
+The FastAPI backend must already be running on `http://127.0.0.1:8000` for the dashboard to load health data and run mock inference.
+
+## Current mock request
+
+The frontend currently sends this placeholder base64 value to the backend mock endpoint:
+
+```text
+abcdefghijklmnop
+```
+
+## Coming in Phase 3
+
+Phase 3 will introduce real webcam integration and begin connecting the frontend flow to actual ASL model inference.
+
+Not included yet:
+
+- webcam access
+- real model inference
 - authentication
-- real-time streaming or WebSocket support
-- design system implementation
+- WebSockets

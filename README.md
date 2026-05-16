@@ -4,17 +4,15 @@
 
 This repository is intentionally separate from the existing ASL recognition model repository. In this repo, we are building the product platform, API surface, integration boundary, and deployment structure without copying over the entire legacy codebase.
 
-## Phase 1 scope
+## Current scope
 
-Phase 1 focuses on scaffolding and documentation only.
-
-Included now:
+The repository now includes:
 
 - FastAPI backend structure
 - `GET /health`
 - `POST /api/inference/mock`
+- React + Vite frontend scaffold
 - architecture and integration planning docs
-- frontend planning notes
 
 Not included yet:
 
@@ -28,20 +26,23 @@ Not included yet:
 
 ```text
 asl-ai-platform/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── schemas/
-│   │   ├── services/
-│   │   └── main.py
-│   └── requirements.txt
-├── docs/
-│   ├── ARCHITECTURE.md
-│   └── INTEGRATION_PLAN.md
-├── frontend/
-│   └── README.md
-└── README.md
++-- backend/
+|   +-- app/
+|   |   +-- api/
+|   |   +-- core/
+|   |   +-- schemas/
+|   |   +-- services/
+|   |   `-- main.py
+|   `-- requirements.txt
++-- docs/
+|   +-- ARCHITECTURE.md
+|   `-- INTEGRATION_PLAN.md
++-- frontend/
+|   +-- src/
+|   +-- package.json
+|   +-- vite.config.js
+|   `-- README.md
+`-- README.md
 ```
 
 ## Backend setup
@@ -56,6 +57,17 @@ uvicorn app.main:app --app-dir backend --reload
 ```
 
 The API will then be available at `http://127.0.0.1:8000`.
+
+## Frontend setup
+
+From the `frontend/` directory:
+
+```powershell
+npm install
+npm run dev
+```
+
+The frontend will then be available at `http://127.0.0.1:5173`.
 
 ## Example requests
 
@@ -77,7 +89,7 @@ curl -X POST http://127.0.0.1:8000/api/inference/mock `
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Integration plan](docs/INTEGRATION_PLAN.md)
-- [Frontend plan](frontend/README.md)
+- [Frontend guide](frontend/README.md)
 
 ## Roadmap
 

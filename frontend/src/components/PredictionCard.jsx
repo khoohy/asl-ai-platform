@@ -40,6 +40,43 @@ export default function PredictionCard({ prediction }) {
           <dt>Model source</dt>
           <dd>{prediction?.model_source ?? "Not available"}</dd>
         </div>
+        <div>
+          <dt>Raw prediction</dt>
+          <dd>{prediction?.raw_prediction ?? "Not available"}</dd>
+        </div>
+        <div>
+          <dt>Raw confidence</dt>
+          <dd>
+            {typeof prediction?.raw_confidence === "number"
+              ? `${Math.round(prediction.raw_confidence * 100)}%`
+              : "Not available"}
+          </dd>
+        </div>
+        <div>
+          <dt>Stable prediction</dt>
+          <dd>{prediction?.stable_prediction ?? "Not available"}</dd>
+        </div>
+        <div>
+          <dt>Stable confidence</dt>
+          <dd>
+            {typeof prediction?.stable_confidence === "number"
+              ? `${Math.round(prediction.stable_confidence * 100)}%`
+              : "Not available"}
+          </dd>
+        </div>
+        <div>
+          <dt>Stabilization</dt>
+          <dd>{prediction?.stabilization_status ?? "Not available"}</dd>
+        </div>
+        <div>
+          <dt>Votes</dt>
+          <dd>
+            {typeof prediction?.vote_count === "number" &&
+            typeof prediction?.vote_window_size === "number"
+              ? `${prediction.vote_count}/${prediction.vote_window_size}`
+              : "Not available"}
+          </dd>
+        </div>
       </dl>
 
       <p className="inline-message">
@@ -48,7 +85,7 @@ export default function PredictionCard({ prediction }) {
       </p>
 
       <div className="topk-block">
-        <p className="topk-title">Top K</p>
+        <p className="topk-title">Top 5 raw model candidates</p>
         {topKPredictions.length > 0 ? (
           <ul className="topk-list">
             {topKPredictions.map((item) => (

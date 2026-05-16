@@ -49,4 +49,26 @@ python backend\scripts\test_sequence_inference.py backend\artifacts\phase4b_test
 ```
 
 - Predictions in this phase are raw and intentionally not stabilized yet.
-- Phase 4D will add stabilization, voting, and confusion-handling logic.
+- Phase 4D adds continuous frontend capture, while Phase 4E adds backend stabilization.
+
+## Phase 4E: Runtime stabilization
+
+- Added portable stabilization logic on top of raw model inference
+- Preserved the existing raw prediction path and Top-K output
+- Stabilization now includes:
+  - confidence squelch
+  - adaptive fallback thresholding
+  - runner-up margin checks
+  - 10-prediction vote window
+  - minimum vote count of `6`
+  - confusion-pair suppression
+  - sign-specific motion requirements
+  - peak-sign fallback for short strong predictions
+- New smoke test command:
+
+```powershell
+python backend\scripts\test_stabilization.py
+```
+
+- The API now returns both raw and stabilized fields.
+- This phase still does not implement WebSocket streaming, TTS, or sentence-level translation.

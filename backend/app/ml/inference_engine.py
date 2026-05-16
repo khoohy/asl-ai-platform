@@ -9,8 +9,9 @@ import torch
 
 from app.ml.frame_processor import FrameProcessor
 from app.ml.model_loader import ASLModelLoader
-from app.ml.runtime_config import INPUT_DIM, MODEL_SOURCE, SEQUENCE_LENGTH
+from app.ml.runtime_config import INPUT_DIM, MODEL_SOURCE, SEQUENCE_LENGTH, TOP_K
 from app.ml.session_manager import SessionManager
+from app.ml.stabilization import ASLStabilizer
 
 
 @dataclass
@@ -20,7 +21,8 @@ class RuntimeInferenceEngine:
     model_loader: ASLModelLoader | None = None
     frame_processor: FrameProcessor | None = None
     session_manager: SessionManager | None = None
-    top_k: int = 5
+    stabilizer: ASLStabilizer | None = None
+    top_k: int = TOP_K
 
     def __post_init__(self) -> None:
         if self.session_manager is None:
@@ -73,6 +75,8 @@ class RuntimeInferenceEngine:
             )
 
         sequence = session.stack_sequence()
+        motion_delta = self._compute_motion_delta(sequence)
+        session.last_motion_score = motion_delta
         batch = (
             torch.from_numpy(sequence)
             .float()
@@ -101,20 +105,41 @@ class RuntimeInferenceEngine:
             )
 
         prediction = top_k_predictions[0] if top_k_predictions else None
+        stabilizer = self._get_stabilizer()
+        stabilization = stabilizer.stabilize(
+            session=session,
+            top_k_predictions=top_k_predictions,
+            motion_delta=motion_delta,
+        )
+
         session.last_prediction = {
-            "prediction": prediction["label"] if prediction else None,
-            "confidence": float(prediction["confidence"]) if prediction else 0.0,
+            "prediction": stabilization.prediction,
+            "confidence": stabilization.confidence,
             "top_k": top_k_predictions,
+            "raw_prediction": stabilization.raw_prediction,
+            "raw_confidence": stabilization.raw_confidence,
+            "stable_prediction": stabilization.stable_prediction,
+            "stable_confidence": stabilization.stable_confidence,
+            "stabilization_status": stabilization.stabilization_status,
+            "vote_count": stabilization.vote_count,
+            "vote_window_size": stabilization.vote_window_size,
         }
-        session.last_status = "predicted"
+        session.last_status = self._map_status(stabilization.stabilization_status)
 
         return self._base_response(
             session=session,
-            status="predicted",
-            note="Raw model prediction from latest 30-frame buffer",
-            prediction=prediction["label"] if prediction else None,
-            confidence=float(prediction["confidence"]) if prediction else 0.0,
+            status=session.last_status,
+            note=stabilization.note,
+            prediction=stabilization.prediction,
+            confidence=stabilization.confidence,
             top_k=top_k_predictions,
+            raw_prediction=stabilization.raw_prediction,
+            raw_confidence=stabilization.raw_confidence,
+            stable_prediction=stabilization.stable_prediction,
+            stable_confidence=stabilization.stable_confidence,
+            stabilization_status=stabilization.stabilization_status,
+            vote_count=stabilization.vote_count,
+            vote_window_size=stabilization.vote_window_size,
         )
 
     def reset_session(self, session_id: str | None = None) -> dict[str, str]:
@@ -143,6 +168,32 @@ class RuntimeInferenceEngine:
             self.frame_processor = FrameProcessor()
         return self.frame_processor
 
+    def _get_stabilizer(self) -> ASLStabilizer:
+        if self.stabilizer is None:
+            self.stabilizer = ASLStabilizer()
+        return self.stabilizer
+
+    @staticmethod
+    def _compute_motion_delta(sequence) -> float:
+        if sequence.ndim != 2 or len(sequence) < 2:
+            return 0.0
+        hand_dims = min(126, sequence.shape[1])
+        deltas = sequence[1:, :hand_dims] - sequence[:-1, :hand_dims]
+        return float(torch.from_numpy(deltas).abs().mean().item())
+
+    @staticmethod
+    def _map_status(stabilization_status: str) -> str:
+        mapping = {
+            "stable": "stabilized",
+            "collecting_votes": "collecting_votes",
+            "held_confusion": "held_confusion",
+            "low_confidence": "low_confidence",
+            "peak_accepted": "stabilized",
+            "motion_required": "motion_required",
+            "raw_only": "raw_predicted",
+        }
+        return mapping.get(stabilization_status, "raw_predicted")
+
     def _base_response(
         self,
         session,
@@ -151,11 +202,25 @@ class RuntimeInferenceEngine:
         prediction: str | None = None,
         confidence: float = 0.0,
         top_k: list[dict[str, float | str]] | None = None,
+        raw_prediction: str | None = None,
+        raw_confidence: float = 0.0,
+        stable_prediction: str | None = None,
+        stable_confidence: float = 0.0,
+        stabilization_status: str = "raw_only",
+        vote_count: int = 0,
+        vote_window_size: int = 10,
     ) -> dict[str, Any]:
         return {
             "prediction": prediction,
             "confidence": confidence,
             "top_k": top_k or [],
+            "raw_prediction": raw_prediction,
+            "raw_confidence": raw_confidence,
+            "stable_prediction": stable_prediction,
+            "stable_confidence": stable_confidence,
+            "stabilization_status": stabilization_status,
+            "vote_count": vote_count,
+            "vote_window_size": vote_window_size,
             "model_source": MODEL_SOURCE,
             "status": status,
             "frames_collected": session.valid_frames_collected,

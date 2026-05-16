@@ -1,6 +1,6 @@
 # Frontend
 
-Phase 4C adds raw 30-frame model inference on top of the existing webcam capture flow.
+Phase 4E adds runtime stabilization on top of the continuous 30-frame real inference flow.
 
 ## Features in this phase
 
@@ -8,8 +8,10 @@ Phase 4C adds raw 30-frame model inference on top of the existing webcam capture
 - backend health status panel
 - webcam panel with browser camera access
 - single-frame capture to base64
-- webcam-triggered raw real inference request
+- continuous automatic frame capture for real inference
+- webcam-triggered real inference request
 - in-memory real inference session reset
+- stabilized prediction display on top of raw Top-K output
 - separate manual mock inference test panel
 - prediction display card
 - loading and error states for API calls
@@ -62,7 +64,7 @@ npm run dev
 
 ## Browser webcam permission
 
-When you click `Start Camera`, the browser will ask for webcam permission. You must allow access for the Phase 4C webcam capture flow to work.
+When you click `Start Camera`, the browser will ask for webcam permission. You must allow access for the Phase 4D webcam capture flow to work.
 
 The UI handles common camera states such as:
 
@@ -72,6 +74,10 @@ The UI handles common camera states such as:
 - capture not ready
 - raw session warming up
 - no landmarks
+- collecting votes
+- held confusion
+- low confidence
+- stabilized output
 - backend request failure
 
 ## Current mock request
@@ -85,9 +91,25 @@ abcdefghijklmnop
 The webcam flow now supports two paths:
 
 - manual mock inference through the placeholder endpoint
-- raw real inference through the 30-frame rolling model buffer
+- manual real inference through the 30-frame rolling model buffer
+- continuous real inference through a timed capture loop
 
-## What Phase 4C adds
+## Continuous real inference
+
+The frontend now supports:
+
+- `Start Camera`
+- `Stop Camera`
+- `Capture frame and run real inference`
+- `Start Real Inference Session`
+- `Stop Real Inference Session`
+- `Reset Real Inference Session`
+
+The continuous capture loop starts at a safe interval of `200ms` per frame, which is about `5 FPS`.
+
+Only one request is allowed in flight at a time. If a frame request is still running, the next timer tick is skipped instead of queueing overlapping requests.
+
+## What Phase 4E adds
 
 This phase proves that the browser can:
 
@@ -97,15 +119,24 @@ This phase proves that the browser can:
 - encode it as base64
 - send it to the raw sequence inference endpoint
 - warm up a 30-frame rolling session buffer
+- continue sending frames automatically after the session starts
 - display raw Top-K model output once the buffer reaches 30 valid frames
+- show when the backend is still collecting votes
+- show when a stable output has been accepted
+- show when the output is held for low confidence, confusion, or motion reasons
 
 ## Raw prediction note
 
-Phase 4C returns raw model predictions only. Predictions are not stabilized yet, so you may need to capture multiple frames until the buffer reaches `30/30`, and the output may still flicker or be noisy.
+Phase 4E preserves raw predictions but adds a stabilization layer. The UI now shows both:
+
+- raw prediction fields
+- stabilized prediction fields
+
+The backend still performs isolated sign recognition only. It does not yet implement sentence-level translation, WebSocket streaming, or TTS.
 
 ## Coming later
 
-Phase 4D will add stabilization, voting, and confusion-handling logic on top of the raw model output.
+Phase 4F can build on the stabilized backend with further UX and runtime improvements.
 
 Not included yet:
 

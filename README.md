@@ -12,17 +12,20 @@ The repository now includes:
 - `GET /health`
 - `POST /api/inference/mock`
 - React + Vite frontend scaffold
-- browser webcam capture UI wired to the mock backend
-- raw 30-frame rolling ASL model inference in the backend
+- browser webcam capture UI
+- production model loading and 180D frame preprocessing
+- real 30-frame rolling ASL model inference in the backend
+- runtime stabilization on top of raw real inference
+- continuous frontend capture loop for real inference
 - architecture and integration planning docs
 
 Not included yet:
 
-- real ASL model inference
 - authentication
 - WebSockets or real-time streaming
-- full React implementation
-- large model artifacts
+- Docker deployment
+- sentence-level translation
+- TTS
 
 ## Project structure
 
@@ -91,11 +94,13 @@ curl -X POST http://127.0.0.1:8000/api/inference/mock `
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Integration plan](docs/INTEGRATION_PLAN.md)
+- [Changelog](docs/CHANGELOG.md)
+- [Component anatomy](docs/COMPONENT_ANATOMY.md)
 - [Frontend guide](frontend/README.md)
 
 ## Roadmap
 
-1. Add real model integration behind the backend service layer.
-2. Build the React webcam dashboard.
+1. Refine stabilization behavior and live-session UX.
+2. Add streaming-oriented transport when needed.
 3. Add containerization and environment-specific configuration.
 4. Add testing, CI, and deployment workflows.

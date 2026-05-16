@@ -44,6 +44,13 @@ class RealInferenceResponse(BaseModel):
     prediction: str | None
     confidence: float
     top_k: list[TopKPrediction]
+    raw_prediction: str | None = None
+    raw_confidence: float = 0.0
+    stable_prediction: str | None = None
+    stable_confidence: float = 0.0
+    stabilization_status: str = "raw_only"
+    vote_count: int = 0
+    vote_window_size: int = 10
     model_source: str
     status: str
     frames_collected: int

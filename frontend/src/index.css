@@ -274,6 +274,11 @@ code {
   box-shadow: 0 12px 28px rgba(16, 34, 53, 0.2);
 }
 
+.primary-button--accent {
+  background: #18634a;
+  box-shadow: 0 12px 28px rgba(24, 99, 74, 0.22);
+}
+
 .secondary-button {
   padding: 0.7rem 1rem;
   background: rgba(16, 34, 53, 0.08);

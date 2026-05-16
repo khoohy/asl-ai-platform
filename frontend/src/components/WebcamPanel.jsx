@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+const CAPTURE_INTERVAL_MS = 200;
+
 export default function WebcamPanel({
   isLoading,
   isResetting,
@@ -11,6 +13,9 @@ export default function WebcamPanel({
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const intervalRef = useRef(null);
+  const requestInFlightRef = useRef(false);
+  const runRealInferenceRef = useRef(onCaptureAndRunRealInference);
 
   const [cameraStatus, setCameraStatus] = useState(
     "Camera is idle. Start the camera to enable capture.",
@@ -20,9 +25,37 @@ export default function WebcamPanel({
   );
   const [isStartingCamera, setIsStartingCamera] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isInferenceSessionRunning, setIsInferenceSessionRunning] = useState(false);
+  const [isRequestInFlight, setIsRequestInFlight] = useState(false);
   const [cameraError, setCameraError] = useState("");
+  const [framesSent, setFramesSent] = useState(0);
+  const [successfulResponses, setSuccessfulResponses] = useState(0);
+  const [failedResponses, setFailedResponses] = useState(0);
+
+  useEffect(() => {
+    runRealInferenceRef.current = onCaptureAndRunRealInference;
+  }, [onCaptureAndRunRealInference]);
+
+  function stopInferenceSession(options = {}) {
+    const { updateStatus = true } = options;
+
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    requestInFlightRef.current = false;
+    setIsRequestInFlight(false);
+    setIsInferenceSessionRunning(false);
+
+    if (updateStatus) {
+      setCaptureStatus("Real inference session stopped.");
+    }
+  }
 
   function releaseCamera(shouldUpdateState = true) {
+    stopInferenceSession({ updateStatus: false });
+
     const stream = streamRef.current;
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -82,11 +115,11 @@ export default function WebcamPanel({
     }
   }
 
-  async function handleCapture() {
+  async function captureAndSendFrame({ source }) {
     if (!videoRef.current || !canvasRef.current || !isCameraActive) {
       const message = "Camera is not ready yet.";
       setCaptureStatus(message);
-      return;
+      throw new Error(message);
     }
 
     const video = videoRef.current;
@@ -95,7 +128,7 @@ export default function WebcamPanel({
     if (!video.videoWidth || !video.videoHeight) {
       const message = "Capture failed because the video frame is not ready.";
       setCaptureStatus(message);
-      return;
+      throw new Error(message);
     }
 
     try {
@@ -109,13 +142,85 @@ export default function WebcamPanel({
 
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageBase64 = canvas.toDataURL("image/jpeg", 0.92);
+      setFramesSent((count) => count + 1);
 
-      setCaptureStatus("Frame captured and submitted for real inference.");
-      await onCaptureAndRunRealInference(imageBase64);
+      const response = await runRealInferenceRef.current(imageBase64);
+      setSuccessfulResponses((count) => count + 1);
+
+      if (source === "manual") {
+        setCaptureStatus("Manual real inference frame submitted.");
+      } else {
+        setCaptureStatus(
+          `Continuous real inference running at ${CAPTURE_INTERVAL_MS}ms intervals.`,
+        );
+      }
+
+      return response;
     } catch (error) {
+      setFailedResponses((count) => count + 1);
       const message =
         error instanceof Error ? error.message : "Capture failed.";
       setCaptureStatus(message);
+      throw error;
+    }
+  }
+
+  async function handleManualRealInference() {
+    requestInFlightRef.current = true;
+    setIsRequestInFlight(true);
+
+    try {
+      await captureAndSendFrame({ source: "manual" });
+    } catch (error) {
+      return;
+    } finally {
+      requestInFlightRef.current = false;
+      setIsRequestInFlight(false);
+    }
+  }
+
+  function handleStartInferenceSession() {
+    if (!isCameraActive) {
+      setCaptureStatus("Start the camera before starting a real inference session.");
+      return;
+    }
+
+    if (intervalRef.current !== null) {
+      setCaptureStatus("Real inference session is already running.");
+      return;
+    }
+
+    setCaptureStatus(
+      `Continuous real inference started at ${CAPTURE_INTERVAL_MS}ms intervals.`,
+    );
+    setIsInferenceSessionRunning(true);
+
+    intervalRef.current = window.setInterval(async () => {
+      if (requestInFlightRef.current) {
+        return;
+      }
+
+      requestInFlightRef.current = true;
+      setIsRequestInFlight(true);
+
+      try {
+        await captureAndSendFrame({ source: "loop" });
+      } catch (error) {
+        return;
+      } finally {
+        requestInFlightRef.current = false;
+        setIsRequestInFlight(false);
+      }
+    }, CAPTURE_INTERVAL_MS);
+  }
+
+  async function handleResetSession() {
+    const response = await onResetRealInferenceSession();
+    if (response?.status === "reset") {
+      setFramesSent(0);
+      setSuccessfulResponses(0);
+      setFailedResponses(0);
+      setCaptureStatus("Real inference session reset.");
     }
   }
 
@@ -136,7 +241,8 @@ export default function WebcamPanel({
 
       <p className="panel-copy">
         Open the browser camera, capture a single frame, convert it to base64,
-        and send it to the raw 30-frame model buffer endpoint.
+        and send it to the 30-frame model buffer endpoint with runtime
+        stabilization layered on top of the raw model output.
       </p>
 
       <div className={`webcam-stage ${isCameraActive ? "webcam-stage--live" : ""}`}>
@@ -175,25 +281,47 @@ export default function WebcamPanel({
         </button>
       </div>
 
-      <button
-        type="button"
-        className="primary-button"
-        onClick={handleCapture}
-        disabled={!isCameraActive || isLoading}
-      >
-        {isLoading
-          ? "Capturing and running real inference..."
-          : "Capture frame and run real inference"}
-      </button>
+      <div className="button-row">
+        <button
+          type="button"
+          className="primary-button"
+          onClick={handleManualRealInference}
+          disabled={!isCameraActive || isLoading || isRequestInFlight}
+        >
+          {isLoading || isRequestInFlight
+            ? "Capturing manual real frame..."
+            : "Capture frame and run real inference"}
+        </button>
 
-      <button
-        type="button"
-        className="secondary-button secondary-button--inline"
-        onClick={onResetRealInferenceSession}
-        disabled={isResetting}
-      >
-        {isResetting ? "Resetting session..." : "Reset real inference session"}
-      </button>
+        <button
+          type="button"
+          className="primary-button primary-button--accent"
+          onClick={handleStartInferenceSession}
+          disabled={!isCameraActive || isInferenceSessionRunning}
+        >
+          {isInferenceSessionRunning
+            ? "Real inference session running"
+            : "Start Real Inference Session"}
+        </button>
+
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => stopInferenceSession({ updateStatus: true })}
+          disabled={!isInferenceSessionRunning}
+        >
+          Stop Real Inference Session
+        </button>
+
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={handleResetSession}
+          disabled={isResetting}
+        >
+          {isResetting ? "Resetting session..." : "Reset Real Inference Session"}
+        </button>
+      </div>
 
       <dl className="meta-grid meta-grid--single">
         <div>
@@ -203,6 +331,32 @@ export default function WebcamPanel({
         <div>
           <dt>Capture status</dt>
           <dd>{captureStatus}</dd>
+        </div>
+        <div>
+          <dt>Live session state</dt>
+          <dd>
+            {inferenceResult?.status ?? "idle"} |{" "}
+            {typeof inferenceResult?.frames_collected === "number" &&
+            typeof inferenceResult?.sequence_length === "number"
+              ? `${inferenceResult.frames_collected}/${inferenceResult.sequence_length}`
+              : "0/30"}
+          </dd>
+        </div>
+        <div>
+          <dt>Stabilization state</dt>
+          <dd>
+            {inferenceResult?.stabilization_status ?? "raw_only"} |{" "}
+            {typeof inferenceResult?.vote_count === "number" &&
+            typeof inferenceResult?.vote_window_size === "number"
+              ? `${inferenceResult.vote_count}/${inferenceResult.vote_window_size}`
+              : "0/10"}
+          </dd>
+        </div>
+        <div>
+          <dt>Runtime stats</dt>
+          <dd>
+            {`frames sent ${framesSent}, responses ok ${successfulResponses}, failed ${failedResponses}, interval ${CAPTURE_INTERVAL_MS}ms, in flight ${isRequestInFlight ? "yes" : "no"}`}
+          </dd>
         </div>
       </dl>
 

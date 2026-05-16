@@ -76,13 +76,20 @@ def main() -> None:
         "status",
         "prediction",
         "confidence",
+        "raw_prediction",
+        "raw_confidence",
+        "stable_prediction",
+        "stable_confidence",
+        "stabilization_status",
+        "vote_count",
+        "vote_window_size",
         "frames_collected",
         "sequence_length",
         "note",
     ):
         print(f"  {key}: {final_response.get(key)}")
 
-    if final_response["status"] == "predicted":
+    if final_response["top_k"]:
         print("top_k:")
         for item in final_response["top_k"]:
             print(f"  - {item['label']}: {item['confidence']:.6f}")

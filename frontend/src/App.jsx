@@ -79,6 +79,7 @@ export default function App() {
         REAL_INFERENCE_SESSION_ID,
       );
       setPrediction(response);
+      return response;
     } catch (error) {
       setPrediction(null);
       setRealInferenceError(
@@ -102,12 +103,20 @@ export default function App() {
         prediction: null,
         confidence: 0,
         top_k: [],
+        raw_prediction: null,
+        raw_confidence: 0,
+        stable_prediction: null,
+        stable_confidence: 0,
+        stabilization_status: "raw_only",
+        vote_count: 0,
+        vote_window_size: 10,
         model_source: "asl_wlasl300_realtime",
         status: response.status,
         frames_collected: 0,
         sequence_length: 30,
         note: response.note,
       });
+      return response;
     } catch (error) {
       setRealInferenceError(
         error instanceof Error
@@ -130,13 +139,13 @@ export default function App() {
 
       <main className="dashboard">
         <section className="hero">
-          <p className="eyebrow">Phase 4C raw sequence inference</p>
+          <p className="eyebrow">Phase 4E stabilized real inference</p>
           <h1>ASL AI Platform</h1>
           <p className="hero-copy">
             A browser-first dashboard for validating backend availability,
-            capturing webcam frames, filling a 30-frame rolling buffer, and
-            testing raw ASL model inference before stabilization arrives in the
-            next phase.
+            capturing webcam frames continuously, filling a 30-frame rolling
+            buffer automatically, and testing raw plus stabilized ASL model
+            inference during live webcam use.
           </p>
 
           <div className="hero-meta">
@@ -146,7 +155,7 @@ export default function App() {
             </div>
             <div>
               <span className="hero-label">Current mode</span>
-              <strong>Raw 30-frame model inference</strong>
+              <strong>Continuous stabilized 30-frame inference</strong>
             </div>
             <div>
               <span className="hero-label">Session ID</span>

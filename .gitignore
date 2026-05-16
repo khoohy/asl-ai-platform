@@ -27,6 +27,9 @@ logs/
 *.onnx
 data/
 models/
+!backend/models/
+backend/models/*
+!backend/models/asl_wlasl300_realtime.pt
 
 # System
 .DS_Store

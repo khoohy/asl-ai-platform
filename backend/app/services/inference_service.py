@@ -1,7 +1,14 @@
 import base64
 import binascii
 
-from app.schemas.inference import InferenceRequest, MockInferenceResponse
+from app.ml.frame_processor import FrameProcessor
+from app.schemas.inference import (
+    FrameDebugResponse,
+    InferenceRequest,
+    MockInferenceResponse,
+)
+
+frame_processor = FrameProcessor()
 
 
 def _extract_base64_payload(image_base64: str) -> str:
@@ -32,4 +39,14 @@ def run_mock_inference(payload: InferenceRequest) -> MockInferenceResponse:
             "This is a placeholder response for Phase 1. "
             "Real ASL model inference has not been integrated yet."
         ),
+    )
+
+
+def run_frame_debug(payload: InferenceRequest) -> FrameDebugResponse:
+    result = frame_processor.process_base64_image(payload.image_base64)
+    return FrameDebugResponse(
+        status=result.status,
+        feature_dim=result.feature_dim,
+        expected_dim=result.expected_dim,
+        note=result.note,
     )

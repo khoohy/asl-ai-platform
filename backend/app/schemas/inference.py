@@ -14,3 +14,10 @@ class MockInferenceResponse(BaseModel):
     confidence: float
     model_source: str
     note: str
+
+
+class FrameDebugResponse(BaseModel):
+    status: str
+    feature_dim: int
+    expected_dim: int
+    note: str

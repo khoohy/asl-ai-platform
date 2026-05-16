@@ -2,3 +2,6 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.2
 pydantic-settings==2.9.1
 torch>=2.1.0
+numpy>=1.26.0
+opencv-python>=4.10.0
+mediapipe>=0.10.0

@@ -1,15 +1,21 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
 .env
+backend/.env
 
 # Node
 node_modules/
 dist/
 build/
 .env.local
+frontend/.env
+frontend/.env.local
 
 # Logs
 logs/
@@ -25,3 +31,7 @@ models/
 # System
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/

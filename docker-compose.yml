@@ -1,0 +1,5 @@
+services: {}
+
+# Placeholder for future local orchestration.
+# Intentionally empty in Phase 1 because Dockerfiles and the React app
+# are not implemented yet.

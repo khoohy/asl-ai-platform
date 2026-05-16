@@ -1,56 +1,118 @@
 # ASL AI Platform
 
-`asl-ai-platform` is a production-oriented full-stack application repository for serving an American Sign Language experience through a FastAPI backend and a future React frontend.
+`asl-ai-platform` is a full-stack real-time American Sign Language recognition platform built around an existing production ASL sequence model. This repository is the application and runtime layer: FastAPI backend, React frontend, live webcam experience, runtime stabilization, and product-facing integration logic.
 
-This repository is intentionally separate from the existing ASL recognition model repository. In this repo, we are building the product platform, API surface, integration boundary, and deployment structure without copying over the entire legacy codebase.
+This repo is intentionally separate from the older ASL research and training repo. The model contract stays the same, while the platform focuses on live inference usability, deployment shape, and frontend/backend orchestration.
 
-## Current scope
+## What This Project Does
 
-The repository now includes:
+- opens a browser webcam feed
+- shows live hand keypoints in the frontend
+- captures frames continuously while the camera is on
+- converts valid hand-present frames into `180D` feature vectors in the backend
+- maintains a rolling `30`-frame temporal buffer
+- runs the real production ASL model on `1 x 30 x 180`
+- applies runtime stabilization, idle handling, and transition holds
+- returns stabilized live sign output to the UI
 
-- FastAPI backend structure
-- `GET /health`
-- `POST /api/inference/mock`
-- React + Vite frontend scaffold
-- browser webcam capture UI
-- production model loading and 180D frame preprocessing
-- real 30-frame rolling ASL model inference in the backend
-- runtime stabilization on top of raw real inference
-- continuous frontend capture loop for real inference
-- architecture and integration planning docs
+## Current Capabilities
 
-Not included yet:
+- FastAPI backend with lightweight `/health`
+- React + Vite frontend for live webcam recognition
+- production checkpoint loading
+- MediaPipe-based backend preprocessing
+- browser-side keypoint overlay for low-latency visual feedback
+- hot background buffering while the camera is on
+- real model inference with rolling `30`-frame session state
+- stabilization logic ported from the older live runtime
+- idle and no-hands safety behavior
+- latency and runtime metrics in Advanced details
+
+## Not Included Yet
 
 - authentication
-- WebSockets or real-time streaming
+- WebSockets / streaming transport
 - Docker deployment
 - sentence-level translation
 - TTS
+- persistent session storage
 
-## Project structure
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    A[Browser Webcam] --> B[React Frontend]
+    B --> C[Frontend Hand Keypoint Overlay]
+    B --> D[Frame Capture 480px JPEG]
+    D --> E[POST /api/inference/frame]
+    E --> F[FastAPI Backend]
+    F --> G[FrameProcessor]
+    G --> H[MediaPipe Hands / Pose / Face]
+    H --> I[180D Feature Vector]
+    I --> J[Runtime Session Buffer 30 Frames]
+    J --> K[PyTorch ASL Model]
+    K --> L[Raw Top-K Predictions]
+    L --> M[Runtime Stabilization]
+    M --> N[Live Prediction UI]
+```
+
+## Runtime Flow
+
+1. The user clicks `Start Camera`.
+2. The frontend starts the webcam and immediately begins background frame submission.
+3. The backend processes hand-present frames into `180D` vectors and warms the rolling `30`-frame buffer.
+4. The user clicks `Start Recognition`.
+5. Recognition uses the current hot buffer instead of starting from zero.
+6. Once `30` valid frames are available, the backend runs the production temporal model.
+7. Raw Top-K outputs pass through stabilization logic before becoming the main displayed result.
+8. Brief hand loss enters `holding_context`; longer loss clears stale state and returns `waiting_for_hands`.
+
+## Model Contract
+
+The platform preserves the existing production model assumptions:
+
+- sequence length: `30`
+- input dimension: `180`
+- feature layout:
+  - hands: `126`
+  - pose: `21`
+  - face: `33`
+- checkpoint path: `backend/models/asl_wlasl300_realtime.pt`
+
+This project does not retrain the model, change the checkpoint, or alter the `180D` feature order.
+
+## Project Structure
 
 ```text
 asl-ai-platform/
-+-- backend/
-|   +-- app/
-|   |   +-- api/
-|   |   +-- core/
-|   |   +-- schemas/
-|   |   +-- services/
-|   |   `-- main.py
-|   `-- requirements.txt
-+-- docs/
-|   +-- ARCHITECTURE.md
-|   `-- INTEGRATION_PLAN.md
-+-- frontend/
-|   +-- src/
-|   +-- package.json
-|   +-- vite.config.js
-|   `-- README.md
-`-- README.md
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── ml/
+│   │   ├── schemas/
+│   │   └── services/
+│   ├── artifacts/
+│   ├── models/
+│   ├── scripts/
+│   ├── README.md
+│   └── requirements.txt
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── CHANGELOG.md
+│   ├── COMPONENT_ANATOMY.md
+│   └── INTEGRATION_PLAN.md
+├── frontend/
+│   ├── src/
+│   ├── README.md
+│   ├── package.json
+│   └── vite.config.js
+└── README.md
 ```
 
-## Backend setup
+## Setup
+
+### Backend
 
 From the repository root:
 
@@ -61,9 +123,13 @@ pip install -r backend\requirements.txt
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-The API will then be available at `http://127.0.0.1:8000`.
+Backend URL:
 
-## Frontend setup
+```text
+http://127.0.0.1:8000
+```
+
+### Frontend
 
 From the `frontend/` directory:
 
@@ -72,23 +138,59 @@ npm install
 npm run dev
 ```
 
-The frontend will then be available at `http://127.0.0.1:5173`.
+Frontend URL:
 
-## Example requests
-
-Health check:
-
-```powershell
-curl http://127.0.0.1:8000/health
+```text
+http://127.0.0.1:5173
 ```
 
-Mock inference:
+## Main API Routes
 
-```powershell
-curl -X POST http://127.0.0.1:8000/api/inference/mock `
-  -H "Content-Type: application/json" `
-  -d "{\"image_base64\":\"aGVsbG8gd29ybGQ=\"}"
-```
+- `GET /health`
+- `POST /api/inference/mock`
+- `POST /api/inference/frame-debug`
+- `POST /api/inference/frame`
+- `POST /api/inference/reset-session`
+
+## Live Recognition UX
+
+- `Start Camera`
+  - starts webcam
+  - starts background buffering immediately
+- `Start Recognition`
+  - switches into active recognition mode
+  - uses the current hot buffer
+- `Stop Recognition`
+  - pauses recognition output
+  - preserves the buffer while the camera stays on
+- `Stop Camera`
+  - stops webcam
+  - clears session state
+- `Reset`
+  - clears the active backend session
+
+## Performance Notes
+
+Current live capture is tuned for lower latency:
+
+- capture interval: `100ms`
+- capture width: `480px`
+- capture format: `image/jpeg`
+- JPEG quality: `0.6`
+
+The backend also reuses pose and face landmarks across short strides while still running hand detection every frame.
+
+## Why This Repo Is Separate
+
+The older ASL repo remains the research and model-development source. This platform repo exists so the application can evolve independently:
+
+- frontend UX and product behavior
+- API boundaries
+- runtime stabilization
+- latency profiling
+- deployment-oriented structure
+
+That keeps training code, datasets, and experiments out of the main product repo.
 
 ## Documentation
 
@@ -96,11 +198,12 @@ curl -X POST http://127.0.0.1:8000/api/inference/mock `
 - [Integration plan](docs/INTEGRATION_PLAN.md)
 - [Changelog](docs/CHANGELOG.md)
 - [Component anatomy](docs/COMPONENT_ANATOMY.md)
+- [Backend guide](backend/README.md)
 - [Frontend guide](frontend/README.md)
 
 ## Roadmap
 
-1. Refine stabilization behavior and live-session UX.
-2. Add streaming-oriented transport when needed.
-3. Add containerization and environment-specific configuration.
-4. Add testing, CI, and deployment workflows.
+1. Continue refining live inference responsiveness and UX.
+2. Add a more streaming-oriented transport layer when needed.
+3. Add containerization and environment-specific deployment setup.
+4. Add CI, automated browser checks, and broader runtime regression coverage.

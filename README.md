@@ -4,7 +4,7 @@ A production-oriented full-stack platform for real-time **American Sign Language
 
 This repository is the **product/platform layer** of the ASL system. It is intentionally separate from the original training/research repository so the app, API, runtime serving logic, and frontend experience can evolve cleanly without dragging the full experimental codebase into production.
 
----
+
 
 ## Overview
 
@@ -23,7 +23,7 @@ This platform is built around the deployed ASL recognition path, not just raw mo
 - hot-buffer behavior so recognition can start from already collected context
 - idle / no-hands handling for live usability
 
----
+
 
 ## Key Features
 
@@ -54,13 +54,13 @@ This platform is built around the deployed ASL recognition path, not just raw mo
   - sticky live prediction panel
   - Top-5 model guesses
 
----
+
 
 ## System Architecture
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│                            Frontend (React)                         │
+│                            Frontend (React)                          │
 │                                                                      │
 │  Webcam Feed ──> Browser Capture ──> JPEG Frame ──> POST /frame      │
 │       │                                                              │
@@ -121,7 +121,7 @@ This platform is built around the deployed ASL recognition path, not just raw mo
    - Top-5 guesses
    - runtime state (`warming_up`, `holding_context`, `waiting_for_hands`, etc.)
 
----
+
 
 ## Why This Project Exists
 
@@ -141,7 +141,7 @@ In other words:
 - old repo = research + training + model experimentation
 - this repo = application platform + runtime serving + live user experience
 
----
+
 
 ## Current Scope
 
@@ -170,7 +170,7 @@ In other words:
 - cloud deployment
 - CI/CD pipeline
 
----
+
 
 ## Tech Stack
 
@@ -198,7 +198,7 @@ In other words:
 - rolling buffer inference
 - stabilization and live-session decision logic
 
----
+
 
 ## Project Structure
 
@@ -231,7 +231,7 @@ asl-ai-platform/
 └── README.md
 ```
 
----
+
 
 ## Backend Setup
 
@@ -265,7 +265,7 @@ Frontend runs at:
 http://127.0.0.1:5173
 ```
 
----
+
 
 ## How to Use
 
@@ -294,7 +294,7 @@ http://127.0.0.1:5173
 - No-hand frames do not warm the buffer
 - Hand-present valid frames can warm the buffer naturally
 
----
+
 
 ## API Endpoints
 
@@ -321,7 +321,7 @@ Clears current session state and rolling buffer.
 Legacy/dev endpoint kept for internal testing.  
 Not part of the main released UI flow.
 
----
+
 
 ## Runtime Design Notes
 
@@ -361,7 +361,7 @@ The runtime layer does more than just call the model. It includes:
 
 This is essential for live usability.
 
----
+
 
 ## Performance Notes
 
@@ -379,7 +379,7 @@ The biggest remaining future architecture upgrade for even lower latency would l
 
 That is intentionally deferred for now.
 
----
+
 
 ## Documentation
 
@@ -390,7 +390,7 @@ That is intentionally deferred for now.
 - Backend guide: [backend/README.md](backend/README.md)
 - Frontend guide: [frontend/README.md](frontend/README.md)
 
----
+
 
 ## Roadmap
 

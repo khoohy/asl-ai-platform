@@ -1,5 +1,7 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 
+import { HAND_OVERLAY_SETTINGS } from "./handOverlayFilter";
+
 export const HAND_LANDMARKER_WASM_ROOT =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
 export const HAND_LANDMARKER_MODEL_ASSET_PATH =
@@ -28,14 +30,17 @@ export async function getHandLandmarker() {
         },
         runningMode: "VIDEO",
         numHands: 2,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
+        minHandDetectionConfidence: HAND_OVERLAY_SETTINGS.minHandDetectionConfidence,
+        minHandPresenceConfidence: HAND_OVERLAY_SETTINGS.minHandPresenceConfidence,
+        minTrackingConfidence: HAND_OVERLAY_SETTINGS.minTrackingConfidence,
       });
 
       console.info("[keypoints] hand landmarker init success", {
         wasmRoot: HAND_LANDMARKER_WASM_ROOT,
         modelAssetPath: HAND_LANDMARKER_MODEL_ASSET_PATH,
+        minHandDetectionConfidence: HAND_OVERLAY_SETTINGS.minHandDetectionConfidence,
+        minHandPresenceConfidence: HAND_OVERLAY_SETTINGS.minHandPresenceConfidence,
+        minTrackingConfidence: HAND_OVERLAY_SETTINGS.minTrackingConfidence,
       });
       return landmarker;
     } catch (error) {

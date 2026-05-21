@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getHandLandmarker } from "../lib/handLandmarker";
-import { getWebcamControlState } from "./webcamControlState";
+import {
+  createHandOverlayState,
+  getVisibleHandDetections,
+} from "../lib/handOverlayFilter";
+import {
+  getRecognitionStartTransition,
+  getWebcamControlState,
+} from "./webcamControlState";
 
 const CAPTURE_INTERVAL_MS = 100;
 const CAPTURE_WIDTH = 480;
@@ -35,6 +42,7 @@ export default function WebcamPanel({
   const cameraActiveRef = useRef(false);
   const runRealInferenceRef = useRef(onCaptureAndRunRealInference);
   const handLandmarkerRef = useRef(null);
+  const handOverlayStateRef = useRef(createHandOverlayState());
   const animationFrameRef = useRef(null);
   const lastOverlayTimestampRef = useRef(0);
   const overlayStatusRef = useRef("Keypoints: loading");
@@ -163,6 +171,7 @@ export default function WebcamPanel({
 
   useEffect(() => {
     if (!showKeypoints) {
+      handOverlayStateRef.current = createHandOverlayState();
       setOverlayStatusValue("Keypoints: off");
       clearOverlayCanvas();
       return;
@@ -293,6 +302,7 @@ export default function WebcamPanel({
       setCameraStatus("Camera stopped. You can start it again at any time.");
       setCaptureStatus("Camera stopped. Buffer cleared.");
       loggedVideoReadyRef.current = false;
+      handOverlayStateRef.current = createHandOverlayState();
       setOverlayStatusValue(
         showKeypoints ? "Keypoints: no hands" : "Keypoints: off",
       );
@@ -342,6 +352,7 @@ export default function WebcamPanel({
       setCaptureStatus("Camera ready. Buffer warming in background.");
       setRecognitionRunning(false);
       resetLocalRuntimeStats();
+      handOverlayStateRef.current = createHandOverlayState();
       setOverlayStatusValue(
         handLandmarkerRef.current ? "Keypoints: no hands" : "Keypoints: loading",
       );
@@ -363,7 +374,18 @@ export default function WebcamPanel({
   async function captureAndSendFrame({ source, recognitionActive }) {
     const imageBase64 = captureFrameToBase64();
     const requestStartedAt = performance.now();
+    const shouldLogRecognitionRequest =
+      source === "recognition-start" ||
+      (!recognitionActive && recognitionActiveRef.current);
     setFramesSent((count) => count + 1);
+
+    if (shouldLogRecognitionRequest) {
+      console.info("[recognition] sending frame", {
+        source,
+        recognitionActive,
+        recognitionActiveRef: recognitionActiveRef.current,
+      });
+    }
 
     try {
       const response = await runRealInferenceRef.current(imageBase64, {
@@ -387,9 +409,21 @@ export default function WebcamPanel({
           : 0,
       );
       setSuccessfulResponses((count) => count + 1);
+      if (shouldLogRecognitionRequest) {
+        console.info("[recognition] frame response", {
+          source,
+          requestRecognitionActive: recognitionActive,
+          recognitionActiveRef: recognitionActiveRef.current,
+          status: response?.status ?? "unknown",
+          bufferReady: response?.buffer_ready ?? false,
+          framesCollected: response?.frames_collected ?? 0,
+        });
+      }
 
       if (source === "manual") {
         setCaptureStatus("Single recognition frame submitted.");
+      } else if (!recognitionActive && recognitionActiveRef.current) {
+        setCaptureStatus("Recognition starting. Waiting for the next live frame.");
       } else if (
         response?.status === "holding_context" ||
         response?.status === "waiting_for_hands" ||
@@ -442,19 +476,48 @@ export default function WebcamPanel({
   }
 
   function handleStartInferenceSession() {
-    if (requestInFlightRef.current || isInferenceSessionRunning) {
+    const transition = getRecognitionStartTransition({
+      isCameraActive: cameraActiveRef.current,
+      isRecognitionActive: recognitionActiveRef.current,
+      isRequestInFlight: requestInFlightRef.current,
+      isStoppingCamera,
+    });
+
+    console.info("[recognition] start clicked", {
+      isCameraActive: cameraActiveRef.current,
+      isRecognitionActive: recognitionActiveRef.current,
+      isRequestInFlight: requestInFlightRef.current,
+      isStoppingCamera,
+      transitionReason: transition.reason,
+    });
+
+    if (!transition.shouldStart) {
+      if (!cameraActiveRef.current) {
+        setCaptureStatus("Start the camera before recognition.");
+      }
       return;
     }
 
-    if (!isCameraActive) {
+    if (!cameraActiveRef.current) {
       setCaptureStatus("Start the camera before recognition.");
       return;
     }
 
     startCaptureLoop();
-    setRecognitionRunning(true);
-    setCaptureStatus("Recognition started. Using the live rolling buffer.");
-    void runCaptureTick("recognition-start");
+    setRecognitionRunning(transition.nextRecognitionActive);
+    setCaptureStatus(
+      transition.shouldKickImmediateCapture
+        ? "Recognition started. Using the live rolling buffer."
+        : "Recognition starting. Waiting for the next live frame.",
+    );
+    console.info("[recognition] start applied", {
+      recognitionActiveRef: transition.nextRecognitionActive,
+      shouldKickImmediateCapture: transition.shouldKickImmediateCapture,
+    });
+
+    if (transition.shouldKickImmediateCapture) {
+      void runCaptureTick("recognition-start");
+    }
   }
 
   async function handleResetSession() {
@@ -554,6 +617,7 @@ export default function WebcamPanel({
     }
 
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+      handOverlayStateRef.current = createHandOverlayState();
       setOverlayStatusValue("Keypoints: loading");
       return;
     }
@@ -574,15 +638,22 @@ export default function WebcamPanel({
 
     try {
       const result = handLandmarker.detectForVideo(video, timestamp);
-      setOverlayStatusValue("Keypoints: detecting");
-      drawOverlay(result?.landmarks ?? [], overlayContext);
-      setOverlayStatusValue(
-        result?.landmarks?.length
-          ? "Keypoints: detecting"
-          : "Keypoints: no hands",
+      const overlayResult = getVisibleHandDetections(
+        result,
+        handOverlayStateRef.current,
       );
+      handOverlayStateRef.current = overlayResult.nextState;
+      drawOverlay(overlayResult.visibleHands, overlayContext);
+      if (overlayResult.visibleHands.length > 0) {
+        setOverlayStatusValue("Keypoints: detecting");
+      } else if (overlayResult.debug.pendingDetections > 0) {
+        setOverlayStatusValue("Keypoints: stabilizing");
+      } else {
+        setOverlayStatusValue("Keypoints: no hands");
+      }
     } catch (detectionError) {
       console.error("[keypoints] detection error", detectionError);
+      handOverlayStateRef.current = createHandOverlayState();
       setOverlayStatusValue("Keypoints: error");
     }
   }
@@ -601,7 +672,7 @@ export default function WebcamPanel({
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  function drawOverlay(handLandmarks, context) {
+  function drawOverlay(visibleHands, context) {
     const video = videoRef.current;
     if (!video || !context) {
       return;
@@ -613,7 +684,7 @@ export default function WebcamPanel({
       video.videoWidth || 640,
       video.videoHeight || 480,
     );
-    handLandmarks.forEach((landmarks) => {
+    visibleHands.forEach(({ landmarks }) => {
       drawLineGroup(
         context.ctx,
         landmarks,

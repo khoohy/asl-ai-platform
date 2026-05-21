@@ -4,6 +4,8 @@ A production-oriented full-stack platform for real-time **American Sign Language
 
 This repository is the **product/platform layer** of the ASL system. It is intentionally separate from the original training/research repository so the app, API, runtime serving logic, and frontend experience can evolve cleanly without dragging the full experimental codebase into production.
 
+<img width="1919" height="906" alt="aslplatform" src="https://github.com/user-attachments/assets/107e8aed-aec5-4dbf-8945-d8f0dc59de2f" />
+
 
 
 ## Overview
